@@ -99,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.1 — núcleo ================= */
-const VERSION = '0.1.3';
+const VERSION = '0.1.4';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -662,22 +662,58 @@ async function requestCritique(p, st, level){
   if (!(await LLM.checkStatus())){ toast('IA indisponível: a crítica entrou na fila e roda quando o PC abrir o app.'); render(); return; }
   await runCritique(p, c);
 }
+/* Evidência por critério: campo principal (evidência) e resto do estágio (só contexto) */
+function critEvidence(p, st, cid){
+  const fl = CRIT_FIELDS[cid] || []; const f = p.stages[st.id].fields;
+  const textFields = st.fields.filter(x=>x.type==='textarea'||x.type==='text');
+  if (!fl.length) return {labels:[], main:stageText(p, st), rest:''};
+  const block = arr => arr.filter(x=>(f[x.id]||'').trim()).map(x=>`${x.label.toUpperCase()}:\n${f[x.id]}`).join('\n\n');
+  const main = textFields.filter(x=>fl.includes(x.id)); const rest = textFields.filter(x=>!fl.includes(x.id));
+  return {labels:main.map(x=>x.label), main:block(main), rest:block(rest)};
+}
+const oneCritSchema = {type:'object', required:['nota','trecho','pergunta','motivo'], properties:{nota:{type:'integer',minimum:0,maximum:5}, trecho:{type:'string'}, pergunta:{type:'string'}, motivo:{type:'string'}}};
+const summarySchema = {type:'object', required:['caminho','estudar','ajuda'], properties:{
+  caminho:{type:'object', required:['seguir','justificativa'], properties:{seguir:{type:'string', enum:['seguir','ajustar','abandonar']}, justificativa:{type:'string'}}},
+  estudar:{type:'array', items:{type:'object', required:['conceito','doi'], properties:{conceito:{type:'string'}, doi:{type:'string'}}}}, ajuda:{type:'string'}}};
+const Q3 = '"'.repeat(3);
 async function runCritique(p, c){
-  const st=stageById(c.stageId); c.textHash=hashStr(stageText(p, st)); S.busy['crit_'+c.id]=true; render();
+  const st=stageById(c.stageId); c.textHash=hashStr(stageText(p, st)); const key='crit_'+c.id;
+  const prev = STAGES.filter(s=>p.gates[s.id] && s.id!==st.id).map(s=>`[${s.name} — aprovado]\n${stageText(p,s).slice(0,1200)}`).join('\n\n');
+  const scale = SCALE.map((x,i)=>i+'='+x).join('; ');
   try{
-    const {sys,user}=criticPrompt(p, st, c.level);
-    const out = await LLM.chatValid({system:sys, user, schema:criticSchema(st)}, validateCritique(st));
-    const src = stageText(p, st);
-    out.avaliacoes = st.criteria.map(cr => { const a = {...out.avaliacoes[cr.id], criterio_id:cr.id};
-      const ok = a.trecho ? quoteOK(a.trecho, src) : false;
-      const contradicao = !ok && a.nota<=1 && critFieldText(p, st, cr.id).length>=40;
-      return {...a, trechoOK:ok, semEvidencia: !!a.trecho && !ok, contradicao}; });
-    out.estudar = (out.estudar||[]).slice(0,4).map(e=>({conceito:e.conceito, doi:(e.doi||'').replace(/^https?:\/\/(dx\.)?doi\.org\//,'').trim(), doiOK:null}));
-    c.result = out; c.status='done'; c.doneAt=nowISO(); c.provider=LLM.provider;
+    const avals=[];
+    for (const [n,cr] of st.criteria.entries()){
+      S.busy[key]=`Qwen avaliando… critério ${n+1} de ${st.criteria.length}`; render();
+      const ev = critEvidence(p, st, cr.id);
+      const sys = `Você é um revisor adversarial de periódico Q1 em sensoriamento remoto, geoprocessamento e ciências ambientais. Avalie UM único critério.
+Escala (inteiro 0-5): ${scale}.
+Regras:
+- Use como evidência SOMENTE o bloco "EVIDÊNCIA". O bloco "CONTEXTO" serve só para entender o estudo e nunca pode ser citado.
+- "trecho": cópia LITERAL, de até 200 caracteres, do bloco EVIDÊNCIA que justifica a nota. Se o bloco não trata do critério, use "" e nota 0 ou 1. Se o bloco tem texto sobre o critério, avalie a qualidade do que está escrito.
+- "pergunta": uma pergunta socrática que leve o pesquisador a melhorar ESTE critério.
+- "motivo": por que a nota, em até 60 palavras.
+- PROIBIDO: reescrever o texto, propor redação pronta, sugerir hipóteses no tema do pesquisador.
+- Português.`;
+      const user = `ESTÁGIO: ${st.name}\nCRITÉRIO A AVALIAR: ${cr.t}${cr.o?' (obrigatório)':''}\n\nEVIDÊNCIA${ev.labels.length?' ('+ev.labels.join(' + ')+')':''}:\n${Q3}\n${ev.main||'(vazio)'}\n${Q3}\n\n`
+        + (ev.rest ? `CONTEXTO (não usar como evidência):\n${Q3}\n${ev.rest}\n${Q3}\n\n` : '')
+        + (prev ? 'ESTÁGIOS APROVADOS (contexto):\n'+prev : '');
+      const a = await LLM.chatValid({system:sys, user, schema:oneCritSchema}, o=>Number.isInteger(o.nota)&&o.nota>=0&&o.nota<=5?null:'nota inválida');
+      const okMain = a.trecho ? quoteOK(a.trecho, ev.main) : false;
+      const foraDoCampo = !!a.trecho && !okMain && quoteOK(a.trecho, stageText(p, st));
+      const contradicao = !okMain && a.nota<=1 && critFieldText(p, st, cr.id).length>=40;
+      avals.push({criterio_id:cr.id, nota:a.nota, trecho:a.trecho, pergunta:a.pergunta, motivo:a.motivo, trechoOK:okMain, foraDoCampo, semEvidencia:!!a.trecho && !okMain && !foraDoCampo, contradicao});
+    }
+    S.busy[key]='Qwen avaliando… recomendação final'; render();
+    const sum = await LLM.chatValid({system:`Você é um revisor adversarial de periódico Q1. Com base nas avaliações por critério, dê a recomendação geral (seguir, ajustar ou abandonar o caminho) com justificativa de até 60 palavras e até 4 conceitos para estudar. Preencha "doi" apenas se tiver certeza absoluta; caso contrário "". ${HELP[c.level]} Não reescreva o texto do pesquisador. Português.`,
+      user:`ESTÁGIO: ${st.name}\n\nTEXTO DO PESQUISADOR:\n${Q3}\n${stageText(p, st)}\n${Q3}\n\nAVALIAÇÕES:\n${avals.map(a=>`- ${st.criteria.find(x=>x.id===a.criterio_id).t}: nota ${a.nota}. ${a.motivo}`).join('\n')}`, schema:summarySchema},
+      o=>o.caminho?null:'caminho');
+    const out = {avaliacoes:avals, caminho:sum.caminho, ajuda:sum.ajuda||'',
+      estudar:(sum.estudar||[]).slice(0,4).map(e=>({conceito:e.conceito, doi:(e.doi||'').replace(/^https?:\/\/(dx\.)?doi\.org\//,'').trim(), doiOK:null}))};
+    c.result = out; c.status='done'; c.doneAt=nowISO(); c.provider=LLM.provider; c.mode='por-criterio';
     logDiary(p, {stageId:st.id, stageName:st.name, kind:`crítica N${c.level}`, text:`Recomendação: ${out.caminho?.seguir||'?'} — ${out.caminho?.justificativa||''}`});
     verifyDois(p, c);
   }catch(e){ c.status = String(e.message).includes('indisponível') ? 'pending' : 'error'; c.error=e.message; toast('Crítica: '+e.message, 6000); }
-  delete S.busy['crit_'+c.id]; touch(p); render();
+  delete S.busy[key]; touch(p); render();
 }
 async function verifyDois(p, c){
   for (const e of c.result.estudar){ if(!e.doi){ e.doiOK=false; continue; }
@@ -703,7 +739,7 @@ function renderCritic(p, st){
   const lc = lastCritique(p, st.id); const pend = all.filter(c=>c.status==='pending'); const errs = all.filter(c=>c.status==='error').slice(-1);
   const btn = l => `<button class="b ${l>1?'sec':''}" data-act="critique" data-l="${l}" ${av[l].length?'disabled':''} title="${esc(av[l].join(' '))}">Crítica N${l}</button>`;
   let body='';
-  if (pend.length) body += `<p><span class="pill warn">${S.busy['crit_'+pend[0].id]?'Qwen avaliando…':'Na fila — roda quando a IA estiver disponível'}</span> ${!S.busy['crit_'+pend[0].id]&&LLM.online?'<button class="b sec" data-act="runQueue">Processar agora</button>':''}</p>`;
+  if (pend.length) body += `<p><span class="pill warn">${S.busy['crit_'+pend[0].id]?esc(typeof S.busy['crit_'+pend[0].id]==='string'?S.busy['crit_'+pend[0].id]:'Qwen avaliando…'):'Na fila — roda quando a IA estiver disponível'}</span> ${!S.busy['crit_'+pend[0].id]&&LLM.online?'<button class="b sec" data-act="runQueue">Processar agora</button>':''}</p>`;
   if (errs.length && !lc) body += `<p class="pill bad">Erro: ${esc(errs[0].error)}</p>`;
   if (lc){ const r=lc.result;
     body += `<h3>Crítica N${lc.level} — ${fmtDate(lc.doneAt)} <span class="pill ${r.caminho?.seguir==='seguir'?'ok':r.caminho?.seguir==='abandonar'?'bad':'warn'}">${esc(r.caminho?.seguir||'')}</span></h3>
@@ -711,7 +747,7 @@ function renderCritic(p, st){
       ${r.avaliacoes.map(a=>{ const cr=st.criteria.find(c=>c.id===a.criterio_id); const need=a.nota<=3; const d=lc.decisions[a.criterio_id];
         return `<div class="crit ${cr.o?'obr':''}"><div class="row"><b>${esc(cr.t)}</b><span class="pill ${a.nota>=4?'ok':a.nota>=3?'warn':'bad'}">nota ${a.nota}</span>
           <span class="small muted">sua: ${lc.selfSnapshot[a.criterio_id]??'—'}</span></div>
-          ${a.trecho?`<div class="quote">“${esc(a.trecho)}” ${a.trechoOK?'<span class="pill ok">trecho verificado</span>':'<span class="pill bad">trecho não encontrado no seu texto — nota sem evidência</span>'}</div>`:'<div class="small muted">Sem trecho: o crítico não encontrou evidência no texto.</div>'}
+          ${a.trecho?`<div class="quote">“${esc(a.trecho)}” ${a.trechoOK?'<span class="pill ok">trecho verificado</span>':(a.foraDoCampo?'<span class="pill bad">trecho de outro campo — não conta como evidência deste critério</span>':'<span class="pill bad">trecho não encontrado no seu texto — nota sem evidência</span>')}</div>`:'<div class="small muted">Sem trecho: o crítico não encontrou evidência no texto.</div>'}
           ${a.contradicao?`<div class="small"><span class="pill warn">Atenção</span> O crítico diz que falta evidência, mas o campo «${esc(critFieldLabels(st,a.criterio_id).join(' + '))}» tem texto. Confira; se a crítica estiver errada, rejeite com essa justificativa.</div>`:''}
           <div><b>Pergunta:</b> ${esc(a.pergunta)}</div><div class="small"><b>Motivo:</b> ${esc(a.motivo)}</div>
           ${need?(d?`<div class="small" style="margin-top:4px"><span class="pill ${d.decision==='aceita'?'ok':d.decision==='rejeitada'?'bad':'warn'}">${d.decision}</span> ${esc(d.justification)}</div>`:
