@@ -98,7 +98,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.1 — núcleo ================= */
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -536,8 +536,8 @@ const HELP = {
 };
 function criticSchema(st){
   return { type:'object', required:['avaliacoes','caminho','estudar','ajuda'], properties:{
-    avaliacoes:{type:'array', items:{type:'object', required:['criterio_id','nota','trecho','pergunta','motivo'], properties:{
-      criterio_id:{type:'string', enum:st.criteria.map(c=>c.id)}, nota:{type:'integer', minimum:0, maximum:5}, trecho:{type:'string'}, pergunta:{type:'string'}, motivo:{type:'string'} }}},
+    avaliacoes:{type:'object', required:st.criteria.map(c=>c.id), properties:Object.fromEntries(st.criteria.map(c=>[c.id, {type:'object', required:['nota','trecho','pergunta','motivo'], properties:{
+      nota:{type:'integer', minimum:0, maximum:5}, trecho:{type:'string'}, pergunta:{type:'string'}, motivo:{type:'string'} }}]))},
     caminho:{type:'object', required:['seguir','justificativa'], properties:{seguir:{type:'string', enum:['seguir','ajustar','abandonar']}, justificativa:{type:'string'}}},
     estudar:{type:'array', items:{type:'object', required:['conceito','doi'], properties:{conceito:{type:'string'}, doi:{type:'string'}}}},
     ajuda:{type:'string'} } };
@@ -546,7 +546,7 @@ function criticPrompt(p, st, level){
   const sys = `Você é um revisor adversarial de periódico Q1 em sensoriamento remoto, geoprocessamento e ciências ambientais. Seu papel é encontrar o motivo de rejeição mais provável e fazer o pesquisador pensar.
 Escala de notas (inteiro 0-5): ${SCALE.map((s,i)=>i+'='+s).join('; ')}.
 Regras obrigatórias:
-- Avalie TODOS e SOMENTE os critérios listados, um item por critério, usando o id dado.
+- Em "avaliacoes", preencha uma entrada para CADA id de critério listado (todos, inclusive os não obrigatórios), e nenhum outro.
 - "trecho": cópia LITERAL de até 200 caracteres do texto do pesquisador que justifica a nota. Se o critério não aparece no texto, use "" e nota 0 ou 1.
 - "pergunta": uma pergunta socrática que leve o pesquisador a melhorar o critério.
 - "motivo": por que seguir, ajustar ou abandonar este caminho, em até 60 palavras.
@@ -559,10 +559,11 @@ Regras obrigatórias:
   return {sys, user};
 }
 function validateCritique(st){ return out => {
-  if (!Array.isArray(out.avaliacoes)) return 'sem avaliacoes';
-  const ids = new Set(out.avaliacoes.map(a=>a.criterio_id));
+  if (!out.avaliacoes || typeof out.avaliacoes!=='object') return 'sem avaliacoes';
+  if (Array.isArray(out.avaliacoes)) out.avaliacoes = Object.fromEntries(out.avaliacoes.map(a=>[a.criterio_id, a]));
+  const ids = new Set(Object.keys(out.avaliacoes));
   for (const c of st.criteria) if (!ids.has(c.id)) return 'faltou critério '+c.id;
-  for (const a of out.avaliacoes) if (!Number.isInteger(a.nota) || a.nota<0 || a.nota>5) return 'nota inválida';
+  for (const a of Object.values(out.avaliacoes)) if (!Number.isInteger(a.nota) || a.nota<0 || a.nota>5) return 'nota inválida';
   return null; }; }
 
 function helpAvailability(p, st){
@@ -599,7 +600,7 @@ async function runCritique(p, c){
     const {sys,user}=criticPrompt(p, st, c.level);
     const out = await LLM.chatValid({system:sys, user, schema:criticSchema(st)}, validateCritique(st));
     const src = stageText(p, st);
-    out.avaliacoes = st.criteria.map(cr => { const a = out.avaliacoes.find(x=>x.criterio_id===cr.id);
+    out.avaliacoes = st.criteria.map(cr => { const a = {...out.avaliacoes[cr.id], criterio_id:cr.id};
       const ok = a.trecho ? quoteOK(a.trecho, src) : false;
       return {...a, trechoOK:ok, semEvidencia: !!a.trecho && !ok}; });
     out.estudar = (out.estudar||[]).slice(0,4).map(e=>({conceito:e.conceito, doi:(e.doi||'').replace(/^https?:\/\/(dx\.)?doi\.org\//,'').trim(), doiOK:null}));
