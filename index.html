@@ -79,6 +79,7 @@ th{color:var(--muted);font-weight:600;font-size:13px}
 .rec .t{font-weight:600}
 details summary{cursor:pointer}
 .kpi{display:inline-block;margin-right:18px}
+.hint{margin:2px 0 4px}.hint summary{font-size:12px;color:var(--acc2);font-weight:600;list-style:none}.hint summary::-webkit-details-marker{display:none}.hint[open]{background:var(--chip);border-radius:8px;padding:6px 10px}
 .kpi b{font-size:20px;display:block}
 </style>
 </head>
@@ -98,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.1 — núcleo ================= */
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -335,11 +336,11 @@ function renderStageView(p){
 }
 function renderField(p, st, f){
   const path = `stages.${st.id}.fields.${f.id}`; const val = getPath(p, path) || '';
-  if (f.type==='textarea') return `<div class="col" style="margin:8px 0"><label for="f_${st.id}_${f.id}">${esc(f.label)}</label><textarea id="f_${st.id}_${f.id}" rows="${f.rows||5}" data-bind="${path}">${esc(val)}</textarea></div>`;
-  if (f.type==='text') return `<div class="col" style="margin:8px 0"><label for="f_${st.id}_${f.id}">${esc(f.label)}</label><input type="text" id="f_${st.id}_${f.id}" data-bind="${path}" value="${esc(val)}"></div>`;
-  if (f.type==='rivals') return renderRivals(p);
-  if (f.type==='matrix') return renderMatrix(p);
-  if (f.type==='dag') return renderDag(p);
+  if (f.type==='textarea') return `<div class="col" style="margin:8px 0"><label for="f_${st.id}_${f.id}">${esc(f.label)}</label>${hintHtml(st.id,f.id)}<textarea id="f_${st.id}_${f.id}" rows="${f.rows||5}" data-bind="${path}">${esc(val)}</textarea></div>`;
+  if (f.type==='text') return `<div class="col" style="margin:8px 0"><label for="f_${st.id}_${f.id}">${esc(f.label)}</label>${hintHtml(st.id,f.id)}<input type="text" id="f_${st.id}_${f.id}" data-bind="${path}" value="${esc(val)}"></div>`;
+  if (f.type==='rivals') return hintHtml(st.id,f.id)+renderRivals(p);
+  if (f.type==='matrix') return hintHtml(st.id,f.id)+renderMatrix(p);
+  if (f.type==='dag') return hintHtml(st.id,f.id)+renderDag(p);
   return '';
 }
 ACTIONS.stage = el => { S.stage = Number(el.dataset.i); render(); window.scrollTo(0,0); };
@@ -482,6 +483,72 @@ ACTIONS.declareGate = () => {
 ACTIONS.reopen = () => { const p=cur(); const st=STAGES[S.stage]; if(!confirm('Reabrir este estágio? O registro do portão será removido.')) return;
   delete p.gates[st.id]; logDiary(p,{stageId:st.id, stageName:st.name, kind:'reabertura', text:'Estágio reaberto.'}); touch(p); render(); };
 
+/* ---- help.js ---- */
+/* ================= Ajuda por campo: o que escrever + exemplo de outra pesquisa ================= */
+/* Exemplo FICTÍCIO e de outra área (geleiras andinas), para não contaminar o seu tema. [referência] marca onde entraria uma fonte real. */
+const EXAMPLE_TOPIC = 'Recuo de geleiras tropicais nos Andes (exemplo fictício de outra área)';
+const FIELD_HELP = {
+ s0:{ esboco:{h:'Escreva livremente o que você observou ou intuiu e por que chamou sua atenção. Ainda não precisa de rigor.',
+   ex:'Em imagens Landsat, algumas geleiras da Cordilheira Branca parecem encolher muito mais rápido em certos anos. Não sei se é perda real de gelo ou neve sazonal cobrindo a borda.'} },
+ s1:{
+  fenomeno:{h:'O que se observa, onde (extensão), com que dado e resolução, e em que período. Delimite o suficiente para outra pessoa reproduzir.',
+   ex:'Redução da área das geleiras da Cordilheira Branca (Peru), 2000–2024, observada em composições Landsat (30 m) e Sentinel-2 (10 m) do fim da estação seca, com perdas aparentes de 15% a 40% por geleira.'},
+  conhecimento:{h:'O que a literatura já estabelece sobre o fenômeno, com fontes. É a base contra a qual a anomalia aparece.',
+   ex:'Inventários regionais mostram recuo contínuo das geleiras tropicais desde 1970, atribuído ao aquecimento e à menor precipitação sólida [referência]. Os mapeamentos usam índice de neve (NDSI) com limiar fixo [referência].'},
+  tensao:{h:'O que não se encaixa no que se sabe: um resultado que a teoria não explica, duas explicações incompatíveis, ou um método que não dá conta do problema. É a pergunta escondida no fenômeno. Até 3 frases.',
+   ex:'As taxas de recuo variam muito entre anos vizinhos, mais do que o clima explicaria. Não se sabe quanto dessa variação é perda real e quanto é neve sazonal ou efeito da troca de sensor (Landsat 7 → 8 → Sentinel-2).'},
+  consequencia:{h:'Quem depende da resposta e o que muda, na prática ou na teoria, se a tensão for resolvida. Ligue explicitamente a consequência ao fenômeno e à tensão acima.',
+   ex:'Os planos de abastecimento das cidades a jusante usam essas taxas para projetar a vazão de estiagem. Se parte do recuo medido for artefato, as projeções superestimam a perda de água e orientam investimentos errados.'} },
+ s2:{
+  pergunta:{h:'Uma frase, do tipo por quê, como ou com que erro. Evite perguntas que se respondem só descrevendo.',
+   ex:'Com que erro o mapeamento por NDSI separa a perda real de gelo da cobertura temporária por neve nas bordas das geleiras da Cordilheira Branca?'},
+  unidade:{h:'A entidade sobre a qual você mede e tira conclusões.', ex:'Geleira individual (polígono do inventário) e pixel de 10 m na borda.'},
+  escala:{h:'Resolução, extensão e se a resposta pode mudar com a escala (MAUP, tamanho do pixel).',
+   ex:'Pixels de 10 m e 30 m; geleiras menores que 0,5 km² podem ter erro relativo maior a 30 m, por isso a análise é estratificada por tamanho.'},
+  populacao:{h:'O conjunto de unidades, a região e o período que a conclusão cobre.', ex:'Todas as geleiras do inventário da Cordilheira Branca, 2000–2024.'},
+  edai:{h:'Para cada resposta possível, o que muda (uma crença, um método, uma decisão).',
+   ex:'Se o erro for pequeno, as séries atuais servem ao planejamento; se for grande, as projeções de vazão precisam ser refeitas com outro método.'} },
+ s3:{ rivals:{h:'Explicações concorrentes para o padrão, cada uma como processo: o que acontece, em que ordem e por que produziria o que você observa. Inclua pelo menos um artefato de dados e uma variação natural.',
+   ex:'R1 [mecanismo] Aquecimento: a linha de equilíbrio sobe e a geleira perde massa na borda. R2 [artefato de dados] Troca de sensor: o Sentinel-2 detecta bordas finas que o Landsat 7 não via, mudando a área medida sem mudança real. R3 [variação natural] Neve sazonal: nevadas tardias cobrem a borda e inflam a área naquele ano.'} },
+ s4:{
+  matrix:{h:'Linhas = hipóteses; colunas = observações que você pode medir. Preencha o que cada hipótese prevê. Se duas linhas ficarem iguais, o estudo não distingue essas hipóteses.',
+   ex:'Previsão A, "a perda continua na série de um só sensor": Aquecimento ↑, Troca de sensor =, Neve sazonal ?. Previsão B, "a área anual acompanha as nevadas do ano": Aquecimento =, Troca de sensor =, Neve sazonal ↑.'},
+  notas:{h:'Como cada previsão será medida: dado, métrica e janela temporal.',
+   ex:'A: série só com Landsat 8 (2013–2024), área por geleira. B: correlação entre a área anual e a precipitação sólida da estação (reanálise), por geleira.'} },
+ s5:{
+  dag:{h:'As relações causais que você assume, uma por linha (A -> B). Escolha exposição e desfecho; o app mostra os caminhos de confusão ainda abertos.',
+   ex:'Temperatura -> Recuo\nTemperatura -> Neve\nNeve -> Area_medida\nRecuo -> Area_medida\nSensor -> Area_medida'},
+  controles:{h:'Que áreas ou períodos servem de comparação e de onde vêm os dados.', ex:'Geleiras acima de 5.500 m, com linha de equilíbrio estável, nos mesmos anos e sensores; inventário e DEM públicos.'},
+  contagio:{h:'Se tratados e controles podem se influenciar (vizinhança, fluxo, deslocamento do efeito).', ex:'Geleiras vizinhas compartilham nuvens e neve da mesma tempestade; os controles ficam a mais de 20 km ou em outra vertente.'},
+  desenho:{h:'O nome do desenho de identificação.', ex:'Diferenças em diferenças entre geleiras baixas e altas, antes e depois de 2013.'},
+  seVerdadeira:{h:'O padrão de dados que você esperaria se a hipótese fosse verdadeira.', ex:'Perda contínua mesmo na série de um só sensor e sem relação com as nevadas anuais.'},
+  seFalsa:{h:'O padrão que você esperaria se ela fosse falsa. Precisa ser diferente do anterior; se for igual, o teste não decide nada.', ex:'Perda concentrada nos anos de troca de sensor ou acompanhando as nevadas, e ausente na série de um só sensor.'} },
+ s6:{
+  metrica:{h:'A métrica e o limiar que decide o resultado, fixados antes de ver os dados.', ex:'Erro de área por geleira contra delimitação manual em imagem de alta resolução; aceito o método se o erro médio for menor que 5%.'},
+  validacao:{h:'Como a amostra de referência é sorteada e como os estimadores usam esse desenho.', ex:'Amostra estratificada por tamanho de geleira (3 estratos), 120 geleiras, delimitação manual cega; estimadores de área pelo desenho.'},
+  espacial:{h:'Como a validação respeita o espaço (blocos, regiões) e onde o modelo pode ser aplicado.', ex:'Validação deixando uma sub-bacia de fora por vez; área de aplicabilidade pela distância em altitude e orientação.'},
+  dados:{h:'Fontes de dados confirmadas e onde serão processadas.', ex:'Landsat 5/7/8/9 e Sentinel-2 no GEE; DEM Copernicus 30 m; reanálise para neve.'},
+  poder:{h:'Se a amostra é grande o bastante para detectar o efeito que importa.', ex:'Com 120 geleiras, detectar diferença de 3 pontos percentuais no erro com poder de 80%.'},
+  horas:{h:'Estimativa do trabalho manual.', ex:'120 geleiras × 15 min = 30 horas de delimitação manual.'} },
+ s7:{
+  tProcesso:{h:'Que teoria sobre o processo ambiental o estudo testa ou estende, com referência.', ex:'Testa se a resposta das geleiras tropicais ao aquecimento é linear ou tem limiar de altitude [referência].'},
+  tMedicao:{h:'O que o estudo estabelece sobre o que o satélite consegue saber e com que erro, com referência.', ex:'Estabelece o erro do NDSI em bordas de geleiras pequenas e a quebra causada pela troca de sensor [referência].'},
+  escopo:{h:'Onde a conclusão vale: bioma, tipo de vegetação ou alvo, sensor, escala.', ex:'Geleiras tropicais acima de 4.500 m, sensores ópticos de 10–30 m, fim da estação seca.'},
+  proximo:{h:'O próximo teste que o programa de pesquisa deveria fazer.', ex:'Repetir com radar (Sentinel-1) para eliminar a dependência de céu limpo.'} },
+};
+/* Campo principal de cada critério: informado ao crítico e usado para detectar "sem evidência" com campo preenchido */
+const CRIT_FIELDS = { c1a:['fenomeno'], c1b:['conhecimento'], c1c:['fenomeno','tensao'], c1d:['consequencia'],
+  c2a:['pergunta'], c2b:['unidade'], c2c:['escala'], c2d:['populacao','pergunta'], c2e:['edai'],
+  c4b:['notas'], c5a:['controles'], c5c:['contagio'], c5d:['seVerdadeira','seFalsa'], c5e:['desenho'],
+  c6a:['metrica'], c6b:['validacao'], c6c:['espacial'], c6d:['dados'], c6e:['poder'], c6f:['horas'],
+  c7a:['tProcesso','tMedicao'], c7b:['escopo'], c7c:['proximo'] };
+function critFieldLabels(st, cid){ return (CRIT_FIELDS[cid]||[]).map(f=>st.fields.find(x=>x.id===f)?.label).filter(Boolean); }
+function critFieldText(p, st, cid){ return (CRIT_FIELDS[cid]||[]).map(f=>p.stages[st.id].fields[f]||'').join(' ').trim(); }
+function hintHtml(stId, fId){ const h=FIELD_HELP[stId]?.[fId]; if(!h) return '';
+  const k=stId+'.'+fId; return `<details class="hint" data-k="${k}" ${(S.openHints||new Set()).has(k)?'open':''}><summary title="O que escrever e um exemplo">ⓘ O que escrever</summary><div class="small">${esc(h.h)}</div>
+    <div class="small" style="margin-top:4px"><b>Exemplo</b> <span class="muted">(${esc(EXAMPLE_TOPIC)})</span>:<div class="quote" style="white-space:pre-wrap">${esc(h.ex)}</div></div></details>`; }
+document.addEventListener('toggle', ev => { const d=ev.target; if (!d.classList?.contains('hint')) return; S.openHints ||= new Set(); d.open ? S.openHints.add(d.dataset.k) : S.openHints.delete(d.dataset.k); }, true);
+
 /* ---- llm.js ---- */
 /* ================= IA: cliente, crítico, fila ================= */
 const LLM = {
@@ -548,6 +615,7 @@ Escala de notas (inteiro 0-5): ${SCALE.map((s,i)=>i+'='+s).join('; ')}.
 Regras obrigatórias:
 - Em "avaliacoes", preencha uma entrada para CADA id de critério listado (todos, inclusive os não obrigatórios), e nenhum outro.
 - "trecho": cópia LITERAL de até 200 caracteres do texto do pesquisador que justifica a nota. Se o critério não aparece no texto, use "" e nota 0 ou 1.
+- Procure a evidência de cada critério primeiro no seu campo principal. Não use o trecho de um campo como evidência de outro critério, e não diga que falta evidência se o campo principal tiver texto: nesse caso, avalie a qualidade do que está escrito.
 - "pergunta": uma pergunta socrática que leve o pesquisador a melhorar o critério.
 - "motivo": por que seguir, ajustar ou abandonar este caminho, em até 60 palavras.
 - PROIBIDO: reescrever o texto do pesquisador, propor a pergunta, a hipótese ou o contrafactual prontos, sugerir hipóteses no tema dele, elogiar sem citar trecho, inventar referências.
@@ -555,7 +623,7 @@ Regras obrigatórias:
 - ${HELP[level]}
 - Escreva em português.`;
   const prev = STAGES.filter(s=>p.gates[s.id] && s.id!==st.id).map(s=>`[${s.name} — aprovado]\n${stageText(p,s).slice(0,1500)}`).join('\n\n');
-  const user = `ESTÁGIO: ${st.name}\nDESCRIÇÃO: ${st.desc}\n\nCRITÉRIOS:\n${st.criteria.map(c=>`- ${c.id}${c.o?' (obrigatório)':''}: ${c.t}`).join('\n')}\n\n${prev?'CONTEXTO DOS ESTÁGIOS APROVADOS:\n'+prev+'\n\n':''}TEXTO DO PESQUISADOR NESTE ESTÁGIO:\n"""\n${stageText(p, st)}\n"""`;
+  const user = `ESTÁGIO: ${st.name}\nDESCRIÇÃO: ${st.desc}\n\nCRITÉRIOS:\n${st.criteria.map(c=>{ const fl=critFieldLabels(st,c.id); return `- ${c.id}${c.o?' (obrigatório)':''}: ${c.t}${fl.length?` [campo principal: ${fl.join(' + ')}]`:''}`; }).join('\n')}\n\n${prev?'CONTEXTO DOS ESTÁGIOS APROVADOS:\n'+prev+'\n\n':''}TEXTO DO PESQUISADOR NESTE ESTÁGIO:\n"""\n${stageText(p, st)}\n"""`;
   return {sys, user};
 }
 function validateCritique(st){ return out => {
@@ -602,7 +670,8 @@ async function runCritique(p, c){
     const src = stageText(p, st);
     out.avaliacoes = st.criteria.map(cr => { const a = {...out.avaliacoes[cr.id], criterio_id:cr.id};
       const ok = a.trecho ? quoteOK(a.trecho, src) : false;
-      return {...a, trechoOK:ok, semEvidencia: !!a.trecho && !ok}; });
+      const contradicao = !ok && a.nota<=1 && critFieldText(p, st, cr.id).length>=40;
+      return {...a, trechoOK:ok, semEvidencia: !!a.trecho && !ok, contradicao}; });
     out.estudar = (out.estudar||[]).slice(0,4).map(e=>({conceito:e.conceito, doi:(e.doi||'').replace(/^https?:\/\/(dx\.)?doi\.org\//,'').trim(), doiOK:null}));
     c.result = out; c.status='done'; c.doneAt=nowISO(); c.provider=LLM.provider;
     logDiary(p, {stageId:st.id, stageName:st.name, kind:`crítica N${c.level}`, text:`Recomendação: ${out.caminho?.seguir||'?'} — ${out.caminho?.justificativa||''}`});
@@ -643,6 +712,7 @@ function renderCritic(p, st){
         return `<div class="crit ${cr.o?'obr':''}"><div class="row"><b>${esc(cr.t)}</b><span class="pill ${a.nota>=4?'ok':a.nota>=3?'warn':'bad'}">nota ${a.nota}</span>
           <span class="small muted">sua: ${lc.selfSnapshot[a.criterio_id]??'—'}</span></div>
           ${a.trecho?`<div class="quote">“${esc(a.trecho)}” ${a.trechoOK?'<span class="pill ok">trecho verificado</span>':'<span class="pill bad">trecho não encontrado no seu texto — nota sem evidência</span>'}</div>`:'<div class="small muted">Sem trecho: o crítico não encontrou evidência no texto.</div>'}
+          ${a.contradicao?`<div class="small"><span class="pill warn">Atenção</span> O crítico diz que falta evidência, mas o campo «${esc(critFieldLabels(st,a.criterio_id).join(' + '))}» tem texto. Confira; se a crítica estiver errada, rejeite com essa justificativa.</div>`:''}
           <div><b>Pergunta:</b> ${esc(a.pergunta)}</div><div class="small"><b>Motivo:</b> ${esc(a.motivo)}</div>
           ${need?(d?`<div class="small" style="margin-top:4px"><span class="pill ${d.decision==='aceita'?'ok':d.decision==='rejeitada'?'bad':'warn'}">${d.decision}</span> ${esc(d.justification)}</div>`:
             `<div class="row" style="margin-top:6px"><select id="dec_${a.criterio_id}" style="width:auto"><option value="">decisão…</option><option>aceita</option><option>rejeitada</option><option>adiada</option></select>
