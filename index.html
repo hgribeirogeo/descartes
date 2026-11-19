@@ -98,8 +98,8 @@ details summary{cursor:pointer}
 
 /* ---- core.js ---- */
 'use strict';
-/* ================= Descartes v0.1 — núcleo ================= */
-const VERSION = '0.1.4';
+/* ================= Descartes v0.2 — núcleo ================= */
+const VERSION = '0.2.1';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -107,8 +107,6 @@ const nowISO = () => new Date().toISOString();
 const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-BR', {dateStyle:'short', timeStyle:'short'}) : '';
 function toast(msg, ms=3200){ const t=$('#toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.display='none', ms); }
 function hashStr(s){ let h=0; for(let i=0;i<s.length;i++){ h=((h<<5)-h+s.charCodeAt(i))|0; } return h.toString(36); }
-
-/* Normalização para verificar trechos citados (o trecho precisa existir no texto-fonte) */
 function normTxt(s){
   return String(s||'').normalize('NFKC').toLowerCase()
     .replace(/[‘’‚′]/g,"'").replace(/[“”„″]/g,'"')
@@ -139,31 +137,27 @@ const DB = {
 /* ---------- Estado ---------- */
 const DEFAULT_CONFIG = {
   provider:'ollama', ollamaBase:'http://localhost:11434', ollamaModel:'qwen3:14b', embedModel:'qwen3-embedding:0.6b',
-  allowOpenRouter:false, openrouterKey:'', openrouterModel:'qwen/qwen3-next-80b-a3b-instruct:free',
-  openalexKey:'', email:'', googleClientId:'', temperature:0.2,
+  allowOpenRouter:false, openrouterKey:'', openrouterModel:'', openalexKey:'', email:'', temperature:0.2,
+  gistId:'', githubToken:'', k:100, perQuery:300,
 };
-const S = { config:{...DEFAULT_CONFIG}, projects:[], currentId:null, view:'projeto', stage:0, litTab:'fontes', busy:{} };
+const S = { config:{...DEFAULT_CONFIG}, projects:[], programs:[], catalog:[], currentId:null, view:'pergunta', litTab:'fontes', busy:{} };
 const cur = () => S.projects.find(p => p.id === S.currentId) || null;
 
 function newProject(title){
-  const p = { id:uid('p'), title, createdAt:nowISO(), updatedAt:nowISO(),
-    stages:{}, diary:[], critiques:[], queue:[], gates:{},
-    matrix:{hyps:[{id:uid('h'),name:'H1'},{id:uid('h'),name:'H2'},{id:uid('h'),name:'H0 artefato'}], preds:[{id:uid('c'),name:'Previsão A'},{id:uid('c'),name:'Previsão B'}], cells:{}},
-    dag:{edges:'', exposure:'', outcome:'', adjust:[]},
+  return { id:uid('p'), title, createdAt:nowISO(), updatedAt:nowISO(), journal:null, programId:'',
+    items:{ pergunta:{fields:{}, queries:'', analyses:[]}, hipotese:{fields:{}, queries:'', analyses:[]}, contrafactual:{fields:{}, queries:'', analyses:[]} },
+    diary:[],
     lit:{ records:[], searches:[], criteria:'', schema:[], validation:{threshold:0.6, locked:false, sample:[], manual:{}, equiv:{}, done:false},
-          gap:{claim:'', declared:false, justification:'', decisions:{}}, clusters:null, core:[], coreNotes:{}, k:6 },
-  };
-  for (const st of STAGES) p.stages[st.id] = { fields:{}, self:{}, time:0, helpLevel:0, lastHelpHash:null };
-  return p;
+          gap:{claim:'', declared:false, justification:'', decisions:{}}, clusters:null, core:[], coreNotes:{}, k:6 } };
 }
-
 let saveTimer=null;
 function touch(p=cur()){ if(!p) return; p.updatedAt = nowISO(); clearTimeout(saveTimer); saveTimer=setTimeout(()=>persist(p), 400); }
-async function persist(p){ try{ await DB.put('projects', p); if (typeof Sync!=='undefined') Sync.schedule(); }catch(e){ console.error(e); toast('Erro ao salvar: '+e.message); } }
+async function persist(p){ try{ await DB.put('projects', p); Sync.schedule(); }catch(e){ console.error(e); toast('Erro ao salvar: '+e.message); } }
 async function saveConfig(){ await DB.put('kv', S.config, 'config'); }
+function logDiary(p, entry){ p.diary.push({ id:uid('d'), at:nowISO(), ...entry }); }
 
 /* ---------- Navegação ---------- */
-const VIEWS = [['projeto','Concepção'],['literatura','Literatura'],['diario','Diário'],['metricas','Métricas'],['config','Configurações']];
+const VIEWS = [['pergunta','Pergunta'],['hipotese','Hipótese'],['contrafactual','Contrafactual'],['programa','Programa'],['literatura','Literatura'],['config','Configurações']];
 function renderNav(){
   $('#nav').innerHTML = VIEWS.map(([k,l]) => `<button data-act="view" data-v="${k}" class="${S.view===k?'on':''}">${l}</button>`).join('');
   const sel = $('#projSel');
@@ -172,13 +166,11 @@ function renderNav(){
 function render(){
   renderNav();
   const p = cur(); const app = $('#app');
-  if (!p && S.view!=='config'){ app.innerHTML = `<div class="card"><h2>Bem-vindo ao Descartes</h2><p>Crie um projeto para começar. Cada projeto percorre os estágios do esboço à teoria.</p><button class="b" data-act="newProject">Novo projeto</button></div>`; return; }
-  if (S.view==='projeto') app.innerHTML = renderStageView(p);
+  if (S.view==='config'){ app.innerHTML = renderConfig(); return; }
+  if (S.view==='programa'){ app.innerHTML = renderProgram(); return; }
+  if (!p){ app.innerHTML = `<div class="card"><h2>Descartes</h2><p>Crie um projeto. Em cada projeto você escreve a pergunta, a hipótese e o contrafactual, e o Descartes confronta cada um com a literatura.</p><button class="b" data-act="newProject">Novo projeto</button></div>`; return; }
+  if (ITEMS[S.view]) app.innerHTML = renderItem(p, S.view);
   else if (S.view==='literatura') app.innerHTML = renderLit(p);
-  else if (S.view==='diario') app.innerHTML = renderDiary(p);
-  else if (S.view==='metricas') app.innerHTML = renderMetrics();
-  else if (S.view==='config') app.innerHTML = renderConfig();
-  if (S.view==='projeto' && typeof afterStageRender==='function') afterStageRender(p);
 }
 
 /* ---------- Eventos (delegação) ---------- */
@@ -186,368 +178,65 @@ const ACTIONS = {};
 document.addEventListener('click', async ev => {
   const el = ev.target.closest('[data-act]'); if (!el) return;
   const fn = ACTIONS[el.dataset.act]; if (!fn) return;
-  ev.preventDefault();
+  if (el.tagName!=='INPUT') ev.preventDefault();
   try { await fn(el, ev); } catch(e){ console.error(e); toast('Erro: '+e.message, 6000); }
 });
 document.addEventListener('input', ev => {
   const el = ev.target; const p = cur();
-  if (el.dataset.bind && p){ setPath(p, el.dataset.bind, el.type==='number'? Number(el.value) : el.value); touch(p); S.lastActivity = Date.now();
-    if (el.dataset.rerender || S.view==='projeto') debounceRender(); }
+  if (el.dataset.bind && p){ setPath(p, el.dataset.bind, el.type==='number'? Number(el.value) : el.value); touch(p); if (el.dataset.rerender) debounceRender(); }
+  if (el.dataset.bindp){ const pr=S.programs.find(x=>x.id===el.dataset.pid); if(pr){ setPath(pr, el.dataset.bindp, el.type==='number'?Number(el.value):el.value); pr.updatedAt=nowISO(); savePrograms(); } }
   if (el.dataset.cfg){ S.config[el.dataset.cfg] = el.type==='checkbox' ? el.checked : (el.type==='number'?Number(el.value):el.value); saveConfig(); }
 });
 document.addEventListener('change', ev => {
   const el = ev.target; const p = cur();
   if (el.id==='projSel'){ if (el.value==='__new') ACTIONS.newProject(); else { S.currentId=el.value; DB.put('kv', S.currentId, 'currentId'); render(); } return; }
   if (el.dataset.bindc && p){ setPath(p, el.dataset.bindc, el.type==='checkbox'?el.checked:el.value); touch(p); render(); }
-  if (el.dataset.cfg && (el.type==='checkbox' || el.tagName==='SELECT')){ S.config[el.dataset.cfg] = el.type==='checkbox'?el.checked:el.value; saveConfig(); if (el.dataset.cfg==='provider'||el.dataset.cfg==='allowOpenRouter') LLM.checkStatus(); }
+  if (el.dataset.bindpc){ const pr=S.programs.find(x=>x.id===el.dataset.pid); if(pr){ setPath(pr, el.dataset.bindpc, el.value); pr.updatedAt=nowISO(); savePrograms(); render(); } }
+  if (el.dataset.cfg && (el.type==='checkbox' || el.tagName==='SELECT')){ S.config[el.dataset.cfg] = el.type==='checkbox'?el.checked:el.value; saveConfig(); LLM.checkStatus(); }
   if (el.dataset.chg && ACTIONS[el.dataset.chg]) ACTIONS[el.dataset.chg](el, ev);
 });
 let rrT=null; function debounceRender(){ clearTimeout(rrT); rrT=setTimeout(()=>{ const a=document.activeElement; const id=a&&a.id; const pos=a&&a.selectionStart; render(); if(id){ const n=document.getElementById(id); if(n){ n.focus(); try{ n.setSelectionRange(pos,pos);}catch(e){} } } }, 700); }
-
 function setPath(obj, path, val){ const ks=path.split('.'); let o=obj; for(let i=0;i<ks.length-1;i++){ if(o[ks[i]]==null) o[ks[i]]={}; o=o[ks[i]]; } o[ks[ks.length-1]]=val; }
 function getPath(obj, path){ return path.split('.').reduce((o,k)=>o==null?undefined:o[k], obj); }
 
 ACTIONS.view = el => { S.view = el.dataset.v; render(); window.scrollTo(0,0); };
 ACTIONS.newProject = () => {
   const t = prompt('Nome do projeto (ex.: MRV — permanência da vegetação):'); if (!t) { renderNav(); return; }
-  const p = newProject(t.trim()); S.projects.push(p); S.currentId=p.id; S.view='projeto'; S.stage=0;
+  const p = newProject(t.trim()); S.projects.push(p); S.currentId=p.id; S.view='pergunta';
   DB.put('kv', p.id, 'currentId'); persist(p); render();
 };
 ACTIONS.renameProject = () => { const p=cur(); const t=prompt('Novo nome:', p.title); if(t){ p.title=t.trim(); touch(p); render(); } };
-ACTIONS.deleteProject = async () => { const p=cur(); if(!confirm(`Excluir o projeto "${p.title}" deste aparelho? Exporte um backup antes.`)) return;
-  await DB.del('projects', p.id); S.projects = S.projects.filter(x=>x.id!==p.id); S.currentId = S.projects[0]?.id || null; if(typeof Sync!=='undefined') Sync.markDeleted(p.id); render(); };
+ACTIONS.deleteProject = async () => { const p=cur(); if(!confirm(`Excluir o projeto "${p.title}"? Exporte um backup antes.`)) return;
+  await DB.del('projects', p.id); S.projects = S.projects.filter(x=>x.id!==p.id); S.currentId = S.projects[0]?.id || null; Sync.markDeleted(p.id); render(); };
 
-/* ---------- Diário ---------- */
-function logDiary(p, entry){ p.diary.push({ id:uid('d'), at:nowISO(), ...entry }); touch(p); }
-function renderDiary(p){
-  const rows = [...p.diary].reverse().map(d => `<tr><td class="small">${fmtDate(d.at)}</td><td>${esc(d.stageName||'')}</td><td>${esc(d.kind)}</td><td>${esc(d.text||'')}</td><td>${d.decision?`<span class="pill ${d.decision==='aceita'?'ok':d.decision==='rejeitada'?'bad':'warn'}">${esc(d.decision)}</span>`:''}</td><td>${esc(d.justification||'')}</td></tr>`).join('');
-  return `<div class="card"><h2>Diário de decisões — ${esc(p.title)}</h2>
-  <p class="muted small">Cada crítica recebida exige uma decisão sua. O diário entra no dossiê exportado.</p>
-  <table><tr><th>Data</th><th>Estágio</th><th>Tipo</th><th>Conteúdo</th><th>Decisão</th><th>Justificativa</th></tr>${rows||'<tr><td colspan="6" class="muted">Nada registrado ainda.</td></tr>'}</table></div>`;
-}
-
-/* ---------- Tempo ativo por estágio ---------- */
-S.lastActivity = Date.now();
-document.addEventListener('keydown', ()=>S.lastActivity=Date.now());
-document.addEventListener('pointerdown', ()=>S.lastActivity=Date.now());
-setInterval(()=>{ const p=cur(); if(!p||S.view!=='projeto'||document.hidden) return; if(Date.now()-S.lastActivity>120000) return;
-  const st=p.stages[STAGES[S.stage].id]; st.time=(st.time||0)+15; touch(p); }, 15000);
-
-/* ---------- Inicialização ---------- */
+/* ---------- Inicialização e migração da v0.1 ---------- */
 async function boot(){
   await DB.open();
   const cfg = await DB.get('kv','config'); if (cfg) S.config = {...DEFAULT_CONFIG, ...cfg};
-  S.projects = await DB.all('projects');
-  for (const p of S.projects) migrate(p);
+  S.projects = await DB.all('projects'); for (const p of S.projects) migrate(p);
+  S.programs = (await DB.get('kv','programs')) || [];
+  S.catalog = (await DB.get('kv','catalog')) || [];
   S.currentId = (await DB.get('kv','currentId')) || S.projects[0]?.id || null;
   if (!S.projects.find(p=>p.id===S.currentId)) S.currentId = S.projects[0]?.id || null;
   render();
-  LLM.checkStatus().then(()=>Queue.process());
-  if (typeof Sync!=='undefined') Sync.init();
+  LLM.checkStatus();
+  Sync.init();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
 function migrate(p){
   const base = newProject(p.title);
   for (const k of Object.keys(base)) if (p[k]===undefined) p[k]=base[k];
-  for (const st of STAGES) if (!p.stages[st.id]) p.stages[st.id] = base.stages[st.id];
+  for (const k of Object.keys(base.items)) if (!p.items[k]) p.items[k]=base.items[k];
   for (const k of Object.keys(base.lit)) if (p.lit[k]===undefined) p.lit[k]=base.lit[k];
-}
-
-/* ---- stages.js ---- */
-/* ================= Estágios, rubricas, portões, matriz, DAG ================= */
-const SCALE = ['Ausente','Mencionado, sem conteúdo','Presente, mas vago ou não verificável','Específico, com falha que um revisor apontaria','Específico e verificável, com ressalvas menores','Específico, verificável e sem ressalva previsível de um revisor Q1'];
-
-const STAGES = [
- { id:'s0', name:'0. Esboço', desc:'Observação ou intuição livre. Escreva sem se preocupar com forma.', min:40,
-   fields:[{id:'esboco', label:'Esboço', type:'textarea', rows:8}], criteria:[] },
- { id:'s1', name:'1. Fenômeno e anomalia', desc:'O que se observa, o que se sabe e onde está a tensão com o conhecimento atual. O portão também exige a auditoria da lacuna (Literatura → Lacuna).', min:150,
-   fields:[{id:'fenomeno',label:'Fenômeno observado (extensão, resolução, período)',type:'textarea'},{id:'conhecimento',label:'O que já se sabe (com fontes)',type:'textarea'},{id:'tensao',label:'Tensão ou anomalia (até 3 frases)',type:'textarea'},{id:'consequencia',label:'Consequência prática ou teórica',type:'textarea',rows:3}],
-   criteria:[{id:'c1a',t:'Fenômeno delimitado em extensão, resolução e período',o:1},{id:'c1b',t:'Tensão com o conhecimento atual apontada com fonte',o:1},{id:'c1c',t:'Sinal do fenômeno distinguido do sinal do sensor ou do produto',o:1},{id:'c1d',t:'Consequência prática (MRV, política, gestão) ou teórica',o:0}] },
- { id:'s2', name:'2. Pergunta', desc:'A pergunta em uma frase, com unidade de análise, escala e população.', min:120,
-   fields:[{id:'pergunta',label:'Pergunta (uma frase)',type:'textarea',rows:2},{id:'unidade',label:'Unidade de análise (pixel, polígono, imóvel, hexágono, bacia, estação)',type:'text'},{id:'escala',label:'Escala, resolução e dependência de escala',type:'textarea',rows:3},{id:'populacao',label:'População, extensão e período',type:'text'},{id:'edai',label:'E daí? Que crença ou decisão muda com cada resposta possível',type:'textarea',rows:3}],
-   criteria:[{id:'c2a',t:'Mecanística ou de limite de medição (por quê, como, com que erro)',o:1},{id:'c2b',t:'Unidade de análise explícita',o:1},{id:'c2c',t:'Dependência de escala considerada (MAUP, resolução do sensor)',o:1},{id:'c2d',t:'Respondível com dados alcançáveis',o:0},{id:'c2e',t:'Respostas possíveis mudam uma crença ou decisão',o:0}] },
- { id:'s3', name:'3. Mecanismos rivais', desc:'Três ou mais explicações concorrentes, incluindo artefatos de dados e variação natural. Cada rival deve ser um processo, não um rótulo.', min:150,
-   fields:[{id:'rivals',label:'Rivais',type:'rivals'}],
-   criteria:[{id:'c3a',t:'Cada rival é um processo, não um rótulo',o:1},{id:'c3b',t:'Inclui artefatos de dados: troca ou degradação de sensor, melhora da detecção no tempo, lacunas de nuvem sazonais, erro de co-registro, rótulos herdados de outro mapa',o:1},{id:'c3c',t:'Inclui variação natural: fenologia, seca, fogo, regime de chuvas',o:1}] },
- { id:'s4', name:'4. Hipóteses e previsões', desc:'Matriz hipótese × previsão. Duas linhas iguais significam hipóteses que o estudo não distingue.', min:60,
-   fields:[{id:'matrix',label:'Matriz',type:'matrix'},{id:'notas',label:'Como cada previsão será medida',type:'textarea'}],
-   criteria:[{id:'c4a',t:'Nenhuma linha idêntica a outra',o:1},{id:'c4b',t:'Cada previsão mensurável nos dados disponíveis',o:1},{id:'c4c',t:'Ao menos uma previsão separa o mecanismo dos artefatos',o:1},{id:'c4d',t:'Previsões espaciais ou temporais (padrão no espaço, dependência de escala, sazonalidade)',o:0}] },
- { id:'s5', name:'5. Contrafactual e identificação', desc:'Controles, DAG com confundidores, contágio espacial e o contrafactual epistêmico.', min:200,
-   fields:[{id:'dag',label:'DAG',type:'dag'},{id:'controles',label:'Áreas ou períodos de controle e fonte dos dados',type:'textarea'},{id:'contagio',label:'Contágio espacial entre tratados e controles',type:'textarea',rows:3},{id:'desenho',label:'Desenho (BACI, DiD, controle sintético, pareamento, descontinuidade espacial)',type:'text'},{id:'seVerdadeira',label:'Se a hipótese for VERDADEIRA, eu observaria…',type:'textarea',rows:3},{id:'seFalsa',label:'Se a hipótese for FALSA, eu observaria…',type:'textarea',rows:3}],
-   criteria:[{id:'c5a',t:'Áreas ou períodos de controle definidos, com fonte de dados',o:1},{id:'c5b',t:'Confundidores espaciais no DAG (declividade, acesso, solo, fitofisionomia, clima)',o:1},{id:'c5c',t:'Contágio espacial entre tratados e controles avaliado',o:1},{id:'c5d',t:'Resultado esperado se a hipótese for falsa difere do esperado se verdadeira',o:1},{id:'c5e',t:'Desenho nomeado',o:0}] },
- { id:'s6', name:'6. Teste decisivo e viabilidade', desc:'Métrica, limiar definido antes dos dados, validação, poder e horas. O resultado alimenta a Fase 0 do PAP.', min:200,
-   fields:[{id:'metrica',label:'Métrica e limiar de decisão (definidos antes dos dados)',type:'textarea',rows:3},{id:'validacao',label:'Validação: amostra probabilística estratificada, estimadores',type:'textarea',rows:3},{id:'espacial',label:'Validação espacial (blocos, regiões) e área de aplicabilidade',type:'textarea',rows:3},{id:'dados',label:'Fontes de dados confirmadas e processamento (GEE, nuvem)',type:'textarea',rows:3},{id:'poder',label:'Análise de poder ou justificativa do tamanho amostral',type:'textarea',rows:3},{id:'horas',label:'Horas de interpretação manual estimadas',type:'text'}],
-   criteria:[{id:'c6a',t:'Limiar de decisão definido antes dos dados',o:1},{id:'c6b',t:'Validação por amostra probabilística estratificada com estimadores pelo desenho (Olofsson et al. 2014; Stehman 2014)',o:1},{id:'c6c',t:'Validação espacial por blocos ou regiões, com área de aplicabilidade quando houver extrapolação (Meyer e Pebesma 2021)',o:1},{id:'c6d',t:'Fonte de dados confirmada e processável no GEE ou na nuvem',o:1},{id:'c6e',t:'Análise de poder',o:0},{id:'c6f',t:'Horas de interpretação manual estimadas',o:0}] },
- { id:'s7', name:'7. Posição teórica', desc:'Teoria do processo, teoria da medição, condições de escopo e próximo teste do programa.', min:150,
-   fields:[{id:'tProcesso',label:'Contribuição para a teoria do processo ambiental (com referência)',type:'textarea',rows:3},{id:'tMedicao',label:'Contribuição para a teoria da medição: o que o satélite consegue saber e com que erro (com referência)',type:'textarea',rows:3},{id:'escopo',label:'Condições de escopo (bioma, fitofisionomia, sensor, escala)',type:'textarea',rows:3},{id:'proximo',label:'Próximo teste do programa',type:'textarea',rows:3}],
-   criteria:[{id:'c7a',t:'Declara contribuição para a teoria do processo, da medição ou ambas, com referência',o:1},{id:'c7b',t:'Condições de escopo (bioma, fitofisionomia, sensor, escala)',o:0},{id:'c7c',t:'Próximo teste do programa',o:0}] },
-];
-const stageById = id => STAGES.find(s=>s.id===id);
-function afterStageRender(){}
-
-/* ---------- Texto compilado de um estágio (o que o crítico lê) ---------- */
-function stageText(p, st){
-  const f = p.stages[st.id].fields; const out=[];
-  for (const fd of st.fields){
-    if (fd.type==='rivals'){ const rv=f.rivals||[]; out.push('RIVAIS:\n'+rv.map((r,i)=>`R${i+1} [${r.tipo||'?'}] ${r.nome||''}: ${r.processo||''}`).join('\n')); }
-    else if (fd.type==='matrix'){ out.push('MATRIZ HIPÓTESE × PREVISÃO:\n'+matrixText(p)); }
-    else if (fd.type==='dag'){ const d=p.dag; out.push(`DAG (arestas):\n${d.edges}\nExposição: ${d.exposure}; Desfecho: ${d.outcome}; Ajustados: ${(d.adjust||[]).join(', ')}`); }
-    else if ((f[fd.id]||'').trim()) out.push(`${fd.label.toUpperCase()}:\n${f[fd.id]}`);
+  // v0.1 → v0.2: aproveita textos dos estágios antigos (os dados antigos ficam guardados em p.stages)
+  if (p.stages && !p.migratedV2){
+    const f = s => p.stages?.[s]?.fields || {};
+    if (!p.items.pergunta.fields.texto && f('s2').pergunta) p.items.pergunta.fields.texto = f('s2').pergunta;
+    if (!p.items.contrafactual.fields.texto && (f('s5').seVerdadeira||f('s5').seFalsa||f('s5').controles))
+      p.items.contrafactual.fields.texto = [f('s5').controles, f('s5').seVerdadeira && 'Se verdadeira: '+f('s5').seVerdadeira, f('s5').seFalsa && 'Se falsa: '+f('s5').seFalsa].filter(Boolean).join('\n');
+    p.migratedV2 = true;
   }
-  return out.join('\n\n');
 }
-function stageTextLen(p, st){ return stageText(p, st).replace(/^[A-ZÀ-Ú ,().×\-:\/]+:\n/gm,'').trim().length; }
-
-/* ---------- Avaliação do portão ---------- */
-function selfComplete(p, st){ return st.criteria.every(c => Number.isInteger(p.stages[st.id].self[c.id])); }
-function gateCheck(p, st){
-  const s = p.stages[st.id]; const issues=[];
-  if (stageTextLen(p, st) < st.min) issues.push(`Texto ainda curto (mínimo de ${st.min} caracteres de conteúdo).`);
-  for (const c of st.criteria){ const v=s.self[c.id]; if(!Number.isInteger(v)) { issues.push('Autoavaliação incompleta.'); break; } }
-  for (const c of st.criteria){ const v=s.self[c.id]; if(Number.isInteger(v) && v < (c.o?4:3)) issues.push(`"${c.t.slice(0,60)}…" com nota ${v} (mínimo ${c.o?4:3}).`); }
-  if (pendingDecisions(p, st.id).length) issues.push('Há críticas sem decisão registrada.');
-  if (st.id==='s1' && !gapDeclared(p)) issues.push('Auditoria da lacuna não concluída (Literatura → Lacuna).');
-  if (st.id==='s3' && (p.stages.s3.fields.rivals||[]).filter(r=>(r.nome||'').trim()).length < 3) issues.push('Menos de três rivais.');
-  if (st.id==='s4'){ const m=matrixCheck(p); if (m.problems.length) issues.push(...m.problems); }
-  return issues;
-}
-function stageStatus(p, st){
-  if (p.gates[st.id]) return ['ok','portão cumprido'];
-  const f=p.stages[st.id].fields;
-  const anyText = st.fields.some(fd => fd.type==='rivals' ? (f.rivals||[]).some(r=>(r.nome||r.processo||'').trim()) : fd.type==='matrix' ? Object.values(p.matrix.cells).some(Boolean) : fd.type==='dag' ? !!p.dag.edges.trim() : !!(f[fd.id]||'').trim());
-  if (Queue.pendingFor(p, st.id)) return ['warn','crítica na fila'];
-  return anyText ? ['warn','em andamento'] : ['','não iniciado'];
-}
-
-/* ---------- Renderização do estágio ---------- */
-function renderStageView(p){
-  const st = STAGES[S.stage];
-  const steps = STAGES.map((s,i)=>{ const [cls,lab]=stageStatus(p,s); return `<div class="step ${i===S.stage?'on':''}" data-act="stage" data-i="${i}"><div>${esc(s.name)}</div><div class="st"><span class="pill ${cls}">${lab}</span></div></div>`; }).join('');
-  return `<div class="grid2"><div><div class="stepper">${steps}</div>
-    <div class="card small" style="margin-top:12px"><b>${esc(p.title)}</b><br><span class="muted">Criado em ${fmtDate(p.createdAt)}</span><div class="row" style="margin-top:8px"><button class="b sec" data-act="renameProject">Renomear</button><button class="b sec" data-act="exportDossier">Dossiê</button></div></div></div>
-  <div>
-    <div class="card"><h2>${esc(st.name)}</h2><p class="muted">${esc(st.desc)}</p>${p.gates[st.id]?`<p><span class="pill ok">Portão cumprido em ${fmtDate(p.gates[st.id].at)}</span> <button class="b sec" data-act="reopen">Reabrir estágio</button></p>`:''}
-      ${st.fields.map(f=>renderField(p, st, f)).join('')}
-      <p class="small muted">Tempo ativo neste estágio: ${Math.round((p.stages[st.id].time||0)/60)} min</p></div>
-    ${st.criteria.length?renderRubric(p, st):''}
-    ${st.criteria.length?renderCritic(p, st):''}
-    ${renderGate(p, st)}
-  </div></div>`;
-}
-function renderField(p, st, f){
-  const path = `stages.${st.id}.fields.${f.id}`; const val = getPath(p, path) || '';
-  if (f.type==='textarea') return `<div class="col" style="margin:8px 0"><label for="f_${st.id}_${f.id}">${esc(f.label)}</label>${hintHtml(st.id,f.id)}<textarea id="f_${st.id}_${f.id}" rows="${f.rows||5}" data-bind="${path}">${esc(val)}</textarea></div>`;
-  if (f.type==='text') return `<div class="col" style="margin:8px 0"><label for="f_${st.id}_${f.id}">${esc(f.label)}</label>${hintHtml(st.id,f.id)}<input type="text" id="f_${st.id}_${f.id}" data-bind="${path}" value="${esc(val)}"></div>`;
-  if (f.type==='rivals') return hintHtml(st.id,f.id)+renderRivals(p);
-  if (f.type==='matrix') return hintHtml(st.id,f.id)+renderMatrix(p);
-  if (f.type==='dag') return hintHtml(st.id,f.id)+renderDag(p);
-  return '';
-}
-ACTIONS.stage = el => { S.stage = Number(el.dataset.i); render(); window.scrollTo(0,0); };
-
-/* ---------- Rivais ---------- */
-function renderRivals(p){
-  const rv = p.stages.s3.fields.rivals || (p.stages.s3.fields.rivals = []);
-  const tipos = ['mecanismo','artefato de dados','variação natural'];
-  return `<div style="margin:8px 0">${rv.map((r,i)=>`<div class="crit"><div class="row"><b>R${i+1}</b>
-    <input type="text" id="rv_n_${i}" style="flex:1;min-width:180px" placeholder="Nome curto" data-bind="stages.s3.fields.rivals.${i}.nome" value="${esc(r.nome||'')}">
-    <select data-bindc="stages.s3.fields.rivals.${i}.tipo" style="width:auto"><option value="">tipo…</option>${tipos.map(t=>`<option ${r.tipo===t?'selected':''}>${t}</option>`).join('')}</select>
-    <button class="b sec" data-act="delRival" data-i="${i}">Remover</button></div>
-    <textarea id="rv_p_${i}" rows="3" placeholder="Descreva o processo: o que acontece, em que ordem, e por que produziria o padrão observado" data-bind="stages.s3.fields.rivals.${i}.processo">${esc(r.processo||'')}</textarea></div>`).join('')}
-    <button class="b sec" data-act="addRival">+ Rival</button></div>`;
-}
-ACTIONS.addRival = () => { const p=cur(); (p.stages.s3.fields.rivals ||= []).push({nome:'',tipo:'',processo:''}); touch(p); render(); };
-ACTIONS.delRival = el => { const p=cur(); p.stages.s3.fields.rivals.splice(Number(el.dataset.i),1); touch(p); render(); };
-
-/* ---------- Matriz hipótese × previsão ---------- */
-const MX_VALS = ['', '↑', '↓', '=', '?'];
-function matrixText(p){ const m=p.matrix; return ['Hipótese | '+m.preds.map(c=>c.name).join(' | '), ...m.hyps.map(h=>h.name+' | '+m.preds.map(c=>m.cells[h.id+'|'+c.id]||'?').join(' | '))].join('\n'); }
-function matrixCheck(p){
-  const m=p.matrix; const problems=[]; const warns=[]; const sig = h => m.preds.map(c=>m.cells[h.id+'|'+c.id]||'?').join(',');
-  if (m.hyps.length<2) problems.push('A matriz precisa de ao menos duas hipóteses.');
-  if (m.preds.length<1) problems.push('A matriz precisa de ao menos uma previsão.');
-  const seen={}; const dupRows=new Set();
-  for (const h of m.hyps){ const s=sig(h); if (seen[s]!==undefined){ dupRows.add(h.id); dupRows.add(seen[s]); } else seen[s]=h.id; }
-  if (dupRows.size) problems.push('Linhas idênticas: '+m.hyps.filter(h=>dupRows.has(h.id)).map(h=>h.name).join(', ')+' — o estudo não distingue essas hipóteses.');
-  const uselessCols=[]; const incompleteCols=[];
-  for (const c of m.preds){ const vals=m.hyps.map(h=>m.cells[h.id+'|'+c.id]||'?');
-    if (vals.every(v=>v==='?')) incompleteCols.push(c.name); else if (vals.every(v=>v===vals[0])) uselessCols.push(c.name); }
-  if (uselessCols.length) warns.push('Previsões iguais em todas as hipóteses (não discriminam): '+uselessCols.join(', '));
-  if (incompleteCols.length) problems.push('Previsões sem nenhum valor preenchido: '+incompleteCols.join(', '));
-  return {problems, warns, dupRows};
-}
-function renderMatrix(p){
-  const m=p.matrix; const chk=matrixCheck(p);
-  const head = `<tr><th>Hipótese</th>${m.preds.map((c,j)=>`<th><input type="text" id="mxc_${j}" data-bind="matrix.preds.${j}.name" value="${esc(c.name)}" style="min-width:110px"><button class="b sec small" data-act="mxDelCol" data-i="${j}">×</button></th>`).join('')}<th><button class="b sec" data-act="mxAddCol">+ previsão</button></th></tr>`;
-  const rows = m.hyps.map((h,i)=>`<tr class="${chk.dupRows.has(h.id)?'cell0':''}"><td><input type="text" id="mxr_${i}" data-bind="matrix.hyps.${i}.name" value="${esc(h.name)}" style="min-width:120px"><button class="b sec small" data-act="mxDelRow" data-i="${i}">×</button></td>${m.preds.map(c=>{const k=h.id+'|'+c.id; return `<td><select data-bindc="matrix.cells.${k}">${MX_VALS.map(v=>`<option value="${v}" ${(m.cells[k]||'')===v?'selected':''}>${v||'·'}</option>`).join('')}</select></td>`;}).join('')}<td></td></tr>`).join('');
-  return `<div style="overflow-x:auto;margin:8px 0"><table class="mx">${head}${rows}</table></div>
-  <button class="b sec" data-act="mxAddRow">+ hipótese</button>
-  <p class="small muted">↑ aumenta · ↓ diminui · = sem mudança · ? indefinido</p>
-  ${chk.problems.map(x=>`<div class="pill bad" style="margin:2px 0">${esc(x)}</div>`).join(' ')} ${chk.warns.map(x=>`<div class="pill warn" style="margin:2px 0">${esc(x)}</div>`).join(' ')}
-  ${!chk.problems.length&&!chk.warns.length?'<span class="pill ok">Matriz discriminante</span>':''}`;
-}
-ACTIONS.mxAddRow = () => { const p=cur(); p.matrix.hyps.push({id:uid('h'),name:'H'+(p.matrix.hyps.length+1)}); touch(p); render(); };
-ACTIONS.mxAddCol = () => { const p=cur(); p.matrix.preds.push({id:uid('c'),name:'Previsão '+String.fromCharCode(65+p.matrix.preds.length)}); touch(p); render(); };
-ACTIONS.mxDelRow = el => { const p=cur(); p.matrix.hyps.splice(Number(el.dataset.i),1); touch(p); render(); };
-ACTIONS.mxDelCol = el => { const p=cur(); p.matrix.preds.splice(Number(el.dataset.i),1); touch(p); render(); };
-
-/* ---------- DAG: caminhos de porta dos fundos (critério de Pearl) ---------- */
-function parseDag(txt){
-  const edges=[]; const nodes=new Set();
-  for (const line of String(txt||'').split(/\n|;/)){ const m=line.split(/\s*(?:->|→)\s*/).map(s=>s.trim()).filter(Boolean);
-    for (let i=0;i<m.length-1;i++){ edges.push([m[i],m[i+1]]); nodes.add(m[i]); nodes.add(m[i+1]); } }
-  return {edges, nodes:[...nodes]};
-}
-function dagAnalysis(d){
-  const {edges,nodes}=parseDag(d.edges); const X=d.exposure, Y=d.outcome, Z=new Set(d.adjust||[]);
-  const res={nodes, edges, paths:[], causal:0, warnings:[]};
-  if (!X||!Y||!nodes.includes(X)||!nodes.includes(Y)) return res;
-  const ch={}, pa={}; nodes.forEach(n=>{ch[n]=[];pa[n]=[];}); edges.forEach(([a,b])=>{ch[a].push(b);pa[b].push(a);});
-  const desc = n => { const out=new Set(); const st=[n]; while(st.length){ const v=st.pop(); for(const c of ch[v]) if(!out.has(c)){out.add(c);st.push(c);} } return out; };
-  // ciclo?
-  for (const n of nodes) if (desc(n).has(n)) { res.warnings.push('O grafo tem ciclo: não é um DAG.'); return res; }
-  const dX=desc(X); for (const z of Z) if (dX.has(z)) res.warnings.push(`"${z}" é descendente da exposição: ajustar por ela pode bloquear o efeito ou abrir viés.`);
-  const nb = n => [...ch[n].map(c=>[c,'out']), ...pa[n].map(q=>[q,'in'])];
-  const paths=[]; const walk=(v,path,dirs)=>{ if(path.length>9) return; if(v===Y){ paths.push({path:[...path],dirs:[...dirs]}); return; }
-    for (const [w,dir] of nb(v)) if(!path.includes(w)){ path.push(w); dirs.push(dir); walk(w,path,dirs); path.pop(); dirs.pop(); } };
-  walk(X,[X],[]);
-  for (const {path,dirs} of paths){
-    const directed = dirs.every(d=>d==='out'); if (directed){ res.causal++; continue; }
-    const backdoor = dirs[0]==='in'; if (!backdoor) continue;
-    let blocked=false; const why=[];
-    for (let i=1;i<path.length-1;i++){ const M=path[i]; const inFromPrev = dirs[i-1]==='out'; const inFromNext = dirs[i]==='in';
-      const collider = inFromPrev && inFromNext;
-      if (collider){ const dM=desc(M); if (!Z.has(M) && ![...Z].some(z=>dM.has(z))){ blocked=true; why.push(`colisor ${M} não ajustado`); } }
-      else if (Z.has(M)){ blocked=true; why.push(`${M} ajustado`); } }
-    const arrows = path.map((n,i)=> i===0? n : (dirs[i-1]==='out' ? ' → ' : ' ← ') + n).join('');
-    res.paths.push({txt:arrows, open:!blocked, why:why.join('; ')});
-  }
-  return res;
-}
-function dagSvg(d, an){
-  const n=an.nodes.length; if(!n) return ''; const W=640,H=Math.max(260, 60+n*18), cx=W/2, cy=H/2, R=Math.min(cx,cy)-50;
-  const pos={}; an.nodes.forEach((v,i)=>{ const a=-Math.PI/2+2*Math.PI*i/n; pos[v]=[cx+R*Math.cos(a), cy+R*Math.sin(a)]; });
-  const lines = an.edges.map(([a,b])=>{ const [x1,y1]=pos[a],[x2,y2]=pos[b]; const dx=x2-x1,dy=y2-y1,L=Math.hypot(dx,dy)||1; const s=34/L;
-    return `<line x1="${x1+dx*s}" y1="${y1+dy*s}" x2="${x2-dx*s}" y2="${y2-dy*s}" stroke="currentColor" stroke-opacity=".55" marker-end="url(#ar)"/>`; }).join('');
-  const nodes = an.nodes.map(v=>{ const [x,y]=pos[v]; const col = v===d.exposure?'var(--acc2)':v===d.outcome?'var(--ok)':(d.adjust||[]).includes(v)?'var(--warn)':'var(--muted)';
-    return `<g><rect x="${x-60}" y="${y-14}" width="120" height="28" rx="8" fill="var(--card)" stroke="${col}" stroke-width="2"/><text x="${x}" y="${y+5}" text-anchor="middle" font-size="12" fill="var(--ink)">${esc(v.length>18?v.slice(0,17)+'…':v)}</text></g>`; }).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-height:420px;color:var(--ink)"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor" fill-opacity=".7"/></marker></defs>${lines}${nodes}</svg>`;
-}
-function renderDag(p){
-  const d=p.dag; const an=dagAnalysis(d);
-  const opts = v => `<option value=""></option>`+an.nodes.map(n=>`<option ${v===n?'selected':''}>${esc(n)}</option>`).join('');
-  return `<div style="margin:8px 0"><label for="dagEdges">Arestas, uma por linha (ex.: Declividade -> Supressão)</label>
-  <textarea id="dagEdges" rows="6" data-bind="dag.edges" data-rerender="1" placeholder="Declividade -> Supressão&#10;Declividade -> NDVI&#10;Supressão -> NDVI">${esc(d.edges)}</textarea>
-  <div class="row" style="margin-top:6px"><label>Exposição</label><select style="width:auto" data-bindc="dag.exposure">${opts(d.exposure)}</select>
-  <label>Desfecho</label><select style="width:auto" data-bindc="dag.outcome">${opts(d.outcome)}</select></div>
-  <div class="row small" style="margin-top:6px"><label>Ajustados:</label>${an.nodes.filter(n=>n!==d.exposure&&n!==d.outcome).map(n=>`<label style="font-weight:400"><input type="checkbox" data-act="dagAdj" data-n="${esc(n)}" ${(d.adjust||[]).includes(n)?'checked':''}> ${esc(n)}</label>`).join('')||'<span class="muted">—</span>'}</div>
-  ${dagSvg(d, an)}
-  ${an.warnings.map(w=>`<div class="pill warn">${esc(w)}</div>`).join(' ')}
-  ${d.exposure&&d.outcome?`<p class="small">Caminhos causais diretos: <b>${an.causal}</b>. Caminhos pela porta dos fundos: <b>${an.paths.length}</b>, abertos: <b>${an.paths.filter(x=>x.open).length}</b>.</p>
-  <table class="small">${an.paths.map(x=>`<tr><td>${esc(x.txt)}</td><td>${x.open?'<span class="pill bad">aberto</span>':'<span class="pill ok">bloqueado</span>'}</td><td class="muted">${esc(x.why)}</td></tr>`).join('')}</table>`:'<p class="small muted">Escolha exposição e desfecho para analisar os caminhos.</p>'}
-  <p class="small muted">A análise usa as regras de d-separação: não estima nada, só mostra quais caminhos de confusão continuam abertos com o conjunto ajustado.</p></div>`;
-}
-ACTIONS.dagAdj = el => { const p=cur(); const n=el.dataset.n; const a=new Set(p.dag.adjust||[]); a.has(n)?a.delete(n):a.add(n); p.dag.adjust=[...a]; touch(p); render(); };
-
-/* ---------- Rubrica (autoavaliação primeiro) ---------- */
-function lastCritique(p, stId){ return [...p.critiques].reverse().find(c=>c.stageId===stId && c.status==='done'); }
-function renderRubric(p, st){
-  const s=p.stages[st.id]; const lc=lastCritique(p, st.id);
-  return `<div class="card"><h2>Rubrica — sua autoavaliação</h2><p class="small muted">Pontue antes de ver o crítico. Portão: obrigatórios (borda azul) ≥ 4; demais ≥ 3.</p>
-  ${st.criteria.map(c=>{ const v=s.self[c.id]; const cv = lc?.result?.avaliacoes?.find(a=>a.criterio_id===c.id);
-    return `<div class="crit ${c.o?'obr':''}"><div>${esc(c.t)} ${c.o?'<span class="pill">obrigatório</span>':''}</div>
-    <div class="row" style="margin-top:4px"><div class="scores">${[0,1,2,3,4,5].map(n=>`<button title="${esc(SCALE[n])}" class="${v===n?'on':''}" data-act="self" data-c="${c.id}" data-n="${n}">${n}</button>`).join('')}</div>
-    <span class="small muted">${Number.isInteger(v)?esc(SCALE[v]):''}</span>
-    ${cv?`<span class="pill ${cv.nota>=4?'ok':cv.nota>=3?'warn':'bad'}">crítico: ${cv.nota}</span>`:''}</div></div>`; }).join('')}</div>`;
-}
-ACTIONS.self = el => { const p=cur(); const st=STAGES[S.stage]; p.stages[st.id].self[el.dataset.c]=Number(el.dataset.n); touch(p); render(); };
-
-/* ---------- Portão ---------- */
-function renderGate(p, st){
-  if (p.gates[st.id]) return '';
-  const issues = st.criteria.length || st.id!=='s0' ? gateCheck(p, st) : (stageTextLen(p,st)<st.min?[`Escreva pelo menos ${st.min} caracteres.`]:[]);
-  const lc=lastCritique(p, st.id); const disagree = lc ? st.criteria.filter(c=>c.o && (lc.result.avaliacoes.find(a=>a.criterio_id===c.id)?.nota ?? 5) < 4) : [];
-  return `<div class="card"><h2>Portão</h2>${issues.length?`<ul class="small">${issues.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:'<p><span class="pill ok">Condições atendidas pela sua autoavaliação</span></p>'}
-  ${disagree.length&&!issues.length?`<p class="small"><span class="pill warn">O crítico discorda</span> em ${disagree.length} critério(s) obrigatório(s). Você pode declarar o portão; a discordância fica no diário.</p>`:''}
-  <button class="b" data-act="declareGate" ${issues.length?'disabled':''}>Declarar portão cumprido</button>
-  <p class="small muted">Quem declara o portão é você; o crítico só registra discordância.</p></div>`;
-}
-ACTIONS.declareGate = () => {
-  const p=cur(); const st=STAGES[S.stage]; const lc=lastCritique(p, st.id);
-  const rounds = p.critiques.filter(c=>c.stageId===st.id && c.status==='done').length;
-  const disagree = lc ? st.criteria.filter(c=>c.o && (lc.result.avaliacoes.find(a=>a.criterio_id===c.id)?.nota ?? 5) < 4).map(c=>c.id) : [];
-  p.gates[st.id] = { at:nowISO(), rounds, time:p.stages[st.id].time||0, self:{...p.stages[st.id].self}, critic: lc? Object.fromEntries(lc.result.avaliacoes.map(a=>[a.criterio_id,a.nota])) : null, disagree };
-  logDiary(p, {stageId:st.id, stageName:st.name, kind:'portão', text:`Portão declarado após ${rounds} rodada(s) de crítica.${disagree.length?' Crítico discordou em: '+disagree.join(', '):''}`});
-  touch(p); toast('Portão registrado.'); if (S.stage < STAGES.length-1) S.stage++; render();
-};
-ACTIONS.reopen = () => { const p=cur(); const st=STAGES[S.stage]; if(!confirm('Reabrir este estágio? O registro do portão será removido.')) return;
-  delete p.gates[st.id]; logDiary(p,{stageId:st.id, stageName:st.name, kind:'reabertura', text:'Estágio reaberto.'}); touch(p); render(); };
-
-/* ---- help.js ---- */
-/* ================= Ajuda por campo: o que escrever + exemplo de outra pesquisa ================= */
-/* Exemplo FICTÍCIO e de outra área (geleiras andinas), para não contaminar o seu tema. [referência] marca onde entraria uma fonte real. */
-const EXAMPLE_TOPIC = 'Recuo de geleiras tropicais nos Andes (exemplo fictício de outra área)';
-const FIELD_HELP = {
- s0:{ esboco:{h:'Escreva livremente o que você observou ou intuiu e por que chamou sua atenção. Ainda não precisa de rigor.',
-   ex:'Em imagens Landsat, algumas geleiras da Cordilheira Branca parecem encolher muito mais rápido em certos anos. Não sei se é perda real de gelo ou neve sazonal cobrindo a borda.'} },
- s1:{
-  fenomeno:{h:'O que se observa, onde (extensão), com que dado e resolução, e em que período. Delimite o suficiente para outra pessoa reproduzir.',
-   ex:'Redução da área das geleiras da Cordilheira Branca (Peru), 2000–2024, observada em composições Landsat (30 m) e Sentinel-2 (10 m) do fim da estação seca, com perdas aparentes de 15% a 40% por geleira.'},
-  conhecimento:{h:'O que a literatura já estabelece sobre o fenômeno, com fontes. É a base contra a qual a anomalia aparece.',
-   ex:'Inventários regionais mostram recuo contínuo das geleiras tropicais desde 1970, atribuído ao aquecimento e à menor precipitação sólida [referência]. Os mapeamentos usam índice de neve (NDSI) com limiar fixo [referência].'},
-  tensao:{h:'O que não se encaixa no que se sabe: um resultado que a teoria não explica, duas explicações incompatíveis, ou um método que não dá conta do problema. É a pergunta escondida no fenômeno. Até 3 frases.',
-   ex:'As taxas de recuo variam muito entre anos vizinhos, mais do que o clima explicaria. Não se sabe quanto dessa variação é perda real e quanto é neve sazonal ou efeito da troca de sensor (Landsat 7 → 8 → Sentinel-2).'},
-  consequencia:{h:'Quem depende da resposta e o que muda, na prática ou na teoria, se a tensão for resolvida. Ligue explicitamente a consequência ao fenômeno e à tensão acima.',
-   ex:'Os planos de abastecimento das cidades a jusante usam essas taxas para projetar a vazão de estiagem. Se parte do recuo medido for artefato, as projeções superestimam a perda de água e orientam investimentos errados.'} },
- s2:{
-  pergunta:{h:'Uma frase, do tipo por quê, como ou com que erro. Evite perguntas que se respondem só descrevendo.',
-   ex:'Com que erro o mapeamento por NDSI separa a perda real de gelo da cobertura temporária por neve nas bordas das geleiras da Cordilheira Branca?'},
-  unidade:{h:'A entidade sobre a qual você mede e tira conclusões.', ex:'Geleira individual (polígono do inventário) e pixel de 10 m na borda.'},
-  escala:{h:'Resolução, extensão e se a resposta pode mudar com a escala (MAUP, tamanho do pixel).',
-   ex:'Pixels de 10 m e 30 m; geleiras menores que 0,5 km² podem ter erro relativo maior a 30 m, por isso a análise é estratificada por tamanho.'},
-  populacao:{h:'O conjunto de unidades, a região e o período que a conclusão cobre.', ex:'Todas as geleiras do inventário da Cordilheira Branca, 2000–2024.'},
-  edai:{h:'Para cada resposta possível, o que muda (uma crença, um método, uma decisão).',
-   ex:'Se o erro for pequeno, as séries atuais servem ao planejamento; se for grande, as projeções de vazão precisam ser refeitas com outro método.'} },
- s3:{ rivals:{h:'Explicações concorrentes para o padrão, cada uma como processo: o que acontece, em que ordem e por que produziria o que você observa. Inclua pelo menos um artefato de dados e uma variação natural.',
-   ex:'R1 [mecanismo] Aquecimento: a linha de equilíbrio sobe e a geleira perde massa na borda. R2 [artefato de dados] Troca de sensor: o Sentinel-2 detecta bordas finas que o Landsat 7 não via, mudando a área medida sem mudança real. R3 [variação natural] Neve sazonal: nevadas tardias cobrem a borda e inflam a área naquele ano.'} },
- s4:{
-  matrix:{h:'Linhas = hipóteses; colunas = observações que você pode medir. Preencha o que cada hipótese prevê. Se duas linhas ficarem iguais, o estudo não distingue essas hipóteses.',
-   ex:'Previsão A, "a perda continua na série de um só sensor": Aquecimento ↑, Troca de sensor =, Neve sazonal ?. Previsão B, "a área anual acompanha as nevadas do ano": Aquecimento =, Troca de sensor =, Neve sazonal ↑.'},
-  notas:{h:'Como cada previsão será medida: dado, métrica e janela temporal.',
-   ex:'A: série só com Landsat 8 (2013–2024), área por geleira. B: correlação entre a área anual e a precipitação sólida da estação (reanálise), por geleira.'} },
- s5:{
-  dag:{h:'As relações causais que você assume, uma por linha (A -> B). Escolha exposição e desfecho; o app mostra os caminhos de confusão ainda abertos.',
-   ex:'Temperatura -> Recuo\nTemperatura -> Neve\nNeve -> Area_medida\nRecuo -> Area_medida\nSensor -> Area_medida'},
-  controles:{h:'Que áreas ou períodos servem de comparação e de onde vêm os dados.', ex:'Geleiras acima de 5.500 m, com linha de equilíbrio estável, nos mesmos anos e sensores; inventário e DEM públicos.'},
-  contagio:{h:'Se tratados e controles podem se influenciar (vizinhança, fluxo, deslocamento do efeito).', ex:'Geleiras vizinhas compartilham nuvens e neve da mesma tempestade; os controles ficam a mais de 20 km ou em outra vertente.'},
-  desenho:{h:'O nome do desenho de identificação.', ex:'Diferenças em diferenças entre geleiras baixas e altas, antes e depois de 2013.'},
-  seVerdadeira:{h:'O padrão de dados que você esperaria se a hipótese fosse verdadeira.', ex:'Perda contínua mesmo na série de um só sensor e sem relação com as nevadas anuais.'},
-  seFalsa:{h:'O padrão que você esperaria se ela fosse falsa. Precisa ser diferente do anterior; se for igual, o teste não decide nada.', ex:'Perda concentrada nos anos de troca de sensor ou acompanhando as nevadas, e ausente na série de um só sensor.'} },
- s6:{
-  metrica:{h:'A métrica e o limiar que decide o resultado, fixados antes de ver os dados.', ex:'Erro de área por geleira contra delimitação manual em imagem de alta resolução; aceito o método se o erro médio for menor que 5%.'},
-  validacao:{h:'Como a amostra de referência é sorteada e como os estimadores usam esse desenho.', ex:'Amostra estratificada por tamanho de geleira (3 estratos), 120 geleiras, delimitação manual cega; estimadores de área pelo desenho.'},
-  espacial:{h:'Como a validação respeita o espaço (blocos, regiões) e onde o modelo pode ser aplicado.', ex:'Validação deixando uma sub-bacia de fora por vez; área de aplicabilidade pela distância em altitude e orientação.'},
-  dados:{h:'Fontes de dados confirmadas e onde serão processadas.', ex:'Landsat 5/7/8/9 e Sentinel-2 no GEE; DEM Copernicus 30 m; reanálise para neve.'},
-  poder:{h:'Se a amostra é grande o bastante para detectar o efeito que importa.', ex:'Com 120 geleiras, detectar diferença de 3 pontos percentuais no erro com poder de 80%.'},
-  horas:{h:'Estimativa do trabalho manual.', ex:'120 geleiras × 15 min = 30 horas de delimitação manual.'} },
- s7:{
-  tProcesso:{h:'Que teoria sobre o processo ambiental o estudo testa ou estende, com referência.', ex:'Testa se a resposta das geleiras tropicais ao aquecimento é linear ou tem limiar de altitude [referência].'},
-  tMedicao:{h:'O que o estudo estabelece sobre o que o satélite consegue saber e com que erro, com referência.', ex:'Estabelece o erro do NDSI em bordas de geleiras pequenas e a quebra causada pela troca de sensor [referência].'},
-  escopo:{h:'Onde a conclusão vale: bioma, tipo de vegetação ou alvo, sensor, escala.', ex:'Geleiras tropicais acima de 4.500 m, sensores ópticos de 10–30 m, fim da estação seca.'},
-  proximo:{h:'O próximo teste que o programa de pesquisa deveria fazer.', ex:'Repetir com radar (Sentinel-1) para eliminar a dependência de céu limpo.'} },
-};
-/* Campo principal de cada critério: informado ao crítico e usado para detectar "sem evidência" com campo preenchido */
-const CRIT_FIELDS = { c1a:['fenomeno'], c1b:['conhecimento'], c1c:['fenomeno','tensao'], c1d:['consequencia'],
-  c2a:['pergunta'], c2b:['unidade'], c2c:['escala'], c2d:['populacao','pergunta'], c2e:['edai'],
-  c4b:['notas'], c5a:['controles'], c5c:['contagio'], c5d:['seVerdadeira','seFalsa'], c5e:['desenho'],
-  c6a:['metrica'], c6b:['validacao'], c6c:['espacial'], c6d:['dados'], c6e:['poder'], c6f:['horas'],
-  c7a:['tProcesso','tMedicao'], c7b:['escopo'], c7c:['proximo'] };
-function critFieldLabels(st, cid){ return (CRIT_FIELDS[cid]||[]).map(f=>st.fields.find(x=>x.id===f)?.label).filter(Boolean); }
-function critFieldText(p, st, cid){ return (CRIT_FIELDS[cid]||[]).map(f=>p.stages[st.id].fields[f]||'').join(' ').trim(); }
-function hintHtml(stId, fId){ const h=FIELD_HELP[stId]?.[fId]; if(!h) return '';
-  const k=stId+'.'+fId; return `<details class="hint" data-k="${k}" ${(S.openHints||new Set()).has(k)?'open':''}><summary title="O que escrever e um exemplo">ⓘ O que escrever</summary><div class="small">${esc(h.h)}</div>
-    <div class="small" style="margin-top:4px"><b>Exemplo</b> <span class="muted">(${esc(EXAMPLE_TOPIC)})</span>:<div class="quote" style="white-space:pre-wrap">${esc(h.ex)}</div></div></details>`; }
-document.addEventListener('toggle', ev => { const d=ev.target; if (!d.classList?.contains('hint')) return; S.openHints ||= new Set(); d.open ? S.openHints.add(d.dataset.k) : S.openHints.delete(d.dataset.k); }, true);
 
 /* ---- llm.js ---- */
 /* ================= IA: cliente, crítico, fila ================= */
@@ -595,188 +284,10 @@ const LLM = {
   },
 };
 
-/* ---------- Crítico ---------- */
-const HELP = {
-  1:'NÍVEL 1: no campo "ajuda" escreva string vazia. Ajude apenas com as perguntas socráticas em cada critério.',
-  2:'NÍVEL 2: no campo "ajuda" explique em até 120 palavras o conceito metodológico mais relevante para os critérios com nota baixa e o que estudar, SEM aplicá-lo ao tema do pesquisador e sem propor redação.',
-  3:'NÍVEL 3: no campo "ajuda" dê um exemplo resolvido, em até 150 palavras, de OUTRA área (por exemplo epidemiologia, economia, ecologia marinha, hidrologia de laboratório), nunca do tema do pesquisador, que mostre como o critério mais fraco é atendido.',
-};
-function criticSchema(st){
-  return { type:'object', required:['avaliacoes','caminho','estudar','ajuda'], properties:{
-    avaliacoes:{type:'object', required:st.criteria.map(c=>c.id), properties:Object.fromEntries(st.criteria.map(c=>[c.id, {type:'object', required:['nota','trecho','pergunta','motivo'], properties:{
-      nota:{type:'integer', minimum:0, maximum:5}, trecho:{type:'string'}, pergunta:{type:'string'}, motivo:{type:'string'} }}]))},
-    caminho:{type:'object', required:['seguir','justificativa'], properties:{seguir:{type:'string', enum:['seguir','ajustar','abandonar']}, justificativa:{type:'string'}}},
-    estudar:{type:'array', items:{type:'object', required:['conceito','doi'], properties:{conceito:{type:'string'}, doi:{type:'string'}}}},
-    ajuda:{type:'string'} } };
-}
-function criticPrompt(p, st, level){
-  const sys = `Você é um revisor adversarial de periódico Q1 em sensoriamento remoto, geoprocessamento e ciências ambientais. Seu papel é encontrar o motivo de rejeição mais provável e fazer o pesquisador pensar.
-Escala de notas (inteiro 0-5): ${SCALE.map((s,i)=>i+'='+s).join('; ')}.
-Regras obrigatórias:
-- Em "avaliacoes", preencha uma entrada para CADA id de critério listado (todos, inclusive os não obrigatórios), e nenhum outro.
-- "trecho": cópia LITERAL de até 200 caracteres do texto do pesquisador que justifica a nota. Se o critério não aparece no texto, use "" e nota 0 ou 1.
-- Procure a evidência de cada critério primeiro no seu campo principal. Não use o trecho de um campo como evidência de outro critério, e não diga que falta evidência se o campo principal tiver texto: nesse caso, avalie a qualidade do que está escrito.
-- "pergunta": uma pergunta socrática que leve o pesquisador a melhorar o critério.
-- "motivo": por que seguir, ajustar ou abandonar este caminho, em até 60 palavras.
-- PROIBIDO: reescrever o texto do pesquisador, propor a pergunta, a hipótese ou o contrafactual prontos, sugerir hipóteses no tema dele, elogiar sem citar trecho, inventar referências.
-- "estudar": até 4 conceitos para estudar. Preencha "doi" apenas se tiver certeza absoluta do DOI; caso contrário use "".
-- ${HELP[level]}
-- Escreva em português.`;
-  const prev = STAGES.filter(s=>p.gates[s.id] && s.id!==st.id).map(s=>`[${s.name} — aprovado]\n${stageText(p,s).slice(0,1500)}`).join('\n\n');
-  const user = `ESTÁGIO: ${st.name}\nDESCRIÇÃO: ${st.desc}\n\nCRITÉRIOS:\n${st.criteria.map(c=>{ const fl=critFieldLabels(st,c.id); return `- ${c.id}${c.o?' (obrigatório)':''}: ${c.t}${fl.length?` [campo principal: ${fl.join(' + ')}]`:''}`; }).join('\n')}\n\n${prev?'CONTEXTO DOS ESTÁGIOS APROVADOS:\n'+prev+'\n\n':''}TEXTO DO PESQUISADOR NESTE ESTÁGIO:\n"""\n${stageText(p, st)}\n"""`;
-  return {sys, user};
-}
-function validateCritique(st){ return out => {
-  if (!out.avaliacoes || typeof out.avaliacoes!=='object') return 'sem avaliacoes';
-  if (Array.isArray(out.avaliacoes)) out.avaliacoes = Object.fromEntries(out.avaliacoes.map(a=>[a.criterio_id, a]));
-  const ids = new Set(Object.keys(out.avaliacoes));
-  for (const c of st.criteria) if (!ids.has(c.id)) return 'faltou critério '+c.id;
-  for (const a of Object.values(out.avaliacoes)) if (!Number.isInteger(a.nota) || a.nota<0 || a.nota>5) return 'nota inválida';
-  return null; }; }
-
-function helpAvailability(p, st){
-  const s=p.stages[st.id]; const text=stageText(p, st); const h=hashStr(text);
-  const done = p.critiques.filter(c=>c.stageId===st.id && c.status==='done');
-  const last = done[done.length-1];
-  const revised = !last || last.textHash!==h;
-  const maxLevelUsed = Math.max(0, ...done.map(c=>c.level));
-  const base = [];
-  if (!selfComplete(p, st)) base.push('Faça a autoavaliação de todos os critérios primeiro.');
-  if (stageTextLen(p, st) < Math.min(st.min, 80)) base.push('Escreva mais antes de pedir crítica.');
-  if (pendingDecisions(p, st.id).length) base.push('Registre suas decisões sobre a crítica anterior.');
-  if (Queue.pendingFor(p, st.id)) base.push('Já há uma crítica na fila para este estágio.');
-  const lv = {1:[...base], 2:[...base], 3:[...base]};
-  if (last && !revised) [1,2,3].forEach(l=>lv[l].push('Revise o texto desde a última crítica.'));
-  if (maxLevelUsed < 1) lv[2].push('Disponível depois de uma crítica de nível 1 e uma revisão sua.');
-  if (maxLevelUsed < 2) lv[3].push('Disponível depois de uma crítica de nível 2 e uma revisão sua.');
-  return lv;
-}
-function pendingDecisions(p, stId){
-  const lc = lastCritique(p, stId); if (!lc) return [];
-  return lc.result.avaliacoes.filter(a=>a.nota<=3 && !lc.decisions?.[a.criterio_id]);
-}
-
-async function requestCritique(p, st, level){
-  const c = { id:uid('k'), stageId:st.id, level, at:nowISO(), textHash:hashStr(stageText(p, st)), selfSnapshot:{...p.stages[st.id].self}, status:'pending', decisions:{} };
-  p.critiques.push(c); touch(p);
-  if (!(await LLM.checkStatus())){ toast('IA indisponível: a crítica entrou na fila e roda quando o PC abrir o app.'); render(); return; }
-  await runCritique(p, c);
-}
-/* Evidência por critério: campo principal (evidência) e resto do estágio (só contexto) */
-function critEvidence(p, st, cid){
-  const fl = CRIT_FIELDS[cid] || []; const f = p.stages[st.id].fields;
-  const textFields = st.fields.filter(x=>x.type==='textarea'||x.type==='text');
-  if (!fl.length) return {labels:[], main:stageText(p, st), rest:''};
-  const block = arr => arr.filter(x=>(f[x.id]||'').trim()).map(x=>`${x.label.toUpperCase()}:\n${f[x.id]}`).join('\n\n');
-  const main = textFields.filter(x=>fl.includes(x.id)); const rest = textFields.filter(x=>!fl.includes(x.id));
-  return {labels:main.map(x=>x.label), main:block(main), rest:block(rest)};
-}
-const oneCritSchema = {type:'object', required:['nota','trecho','pergunta','motivo'], properties:{nota:{type:'integer',minimum:0,maximum:5}, trecho:{type:'string'}, pergunta:{type:'string'}, motivo:{type:'string'}}};
-const summarySchema = {type:'object', required:['caminho','estudar','ajuda'], properties:{
-  caminho:{type:'object', required:['seguir','justificativa'], properties:{seguir:{type:'string', enum:['seguir','ajustar','abandonar']}, justificativa:{type:'string'}}},
-  estudar:{type:'array', items:{type:'object', required:['conceito','doi'], properties:{conceito:{type:'string'}, doi:{type:'string'}}}}, ajuda:{type:'string'}}};
-const Q3 = '"'.repeat(3);
-async function runCritique(p, c){
-  const st=stageById(c.stageId); c.textHash=hashStr(stageText(p, st)); const key='crit_'+c.id;
-  const prev = STAGES.filter(s=>p.gates[s.id] && s.id!==st.id).map(s=>`[${s.name} — aprovado]\n${stageText(p,s).slice(0,1200)}`).join('\n\n');
-  const scale = SCALE.map((x,i)=>i+'='+x).join('; ');
-  try{
-    const avals=[];
-    for (const [n,cr] of st.criteria.entries()){
-      S.busy[key]=`Qwen avaliando… critério ${n+1} de ${st.criteria.length}`; render();
-      const ev = critEvidence(p, st, cr.id);
-      const sys = `Você é um revisor adversarial de periódico Q1 em sensoriamento remoto, geoprocessamento e ciências ambientais. Avalie UM único critério.
-Escala (inteiro 0-5): ${scale}.
-Regras:
-- Use como evidência SOMENTE o bloco "EVIDÊNCIA". O bloco "CONTEXTO" serve só para entender o estudo e nunca pode ser citado.
-- "trecho": cópia LITERAL, de até 200 caracteres, do bloco EVIDÊNCIA que justifica a nota. Se o bloco não trata do critério, use "" e nota 0 ou 1. Se o bloco tem texto sobre o critério, avalie a qualidade do que está escrito.
-- "pergunta": uma pergunta socrática que leve o pesquisador a melhorar ESTE critério.
-- "motivo": por que a nota, em até 60 palavras.
-- PROIBIDO: reescrever o texto, propor redação pronta, sugerir hipóteses no tema do pesquisador.
-- Português.`;
-      const user = `ESTÁGIO: ${st.name}\nCRITÉRIO A AVALIAR: ${cr.t}${cr.o?' (obrigatório)':''}\n\nEVIDÊNCIA${ev.labels.length?' ('+ev.labels.join(' + ')+')':''}:\n${Q3}\n${ev.main||'(vazio)'}\n${Q3}\n\n`
-        + (ev.rest ? `CONTEXTO (não usar como evidência):\n${Q3}\n${ev.rest}\n${Q3}\n\n` : '')
-        + (prev ? 'ESTÁGIOS APROVADOS (contexto):\n'+prev : '');
-      const a = await LLM.chatValid({system:sys, user, schema:oneCritSchema}, o=>Number.isInteger(o.nota)&&o.nota>=0&&o.nota<=5?null:'nota inválida');
-      const okMain = a.trecho ? quoteOK(a.trecho, ev.main) : false;
-      const foraDoCampo = !!a.trecho && !okMain && quoteOK(a.trecho, stageText(p, st));
-      const contradicao = !okMain && a.nota<=1 && critFieldText(p, st, cr.id).length>=40;
-      avals.push({criterio_id:cr.id, nota:a.nota, trecho:a.trecho, pergunta:a.pergunta, motivo:a.motivo, trechoOK:okMain, foraDoCampo, semEvidencia:!!a.trecho && !okMain && !foraDoCampo, contradicao});
-    }
-    S.busy[key]='Qwen avaliando… recomendação final'; render();
-    const sum = await LLM.chatValid({system:`Você é um revisor adversarial de periódico Q1. Com base nas avaliações por critério, dê a recomendação geral (seguir, ajustar ou abandonar o caminho) com justificativa de até 60 palavras e até 4 conceitos para estudar. Preencha "doi" apenas se tiver certeza absoluta; caso contrário "". ${HELP[c.level]} Não reescreva o texto do pesquisador. Português.`,
-      user:`ESTÁGIO: ${st.name}\n\nTEXTO DO PESQUISADOR:\n${Q3}\n${stageText(p, st)}\n${Q3}\n\nAVALIAÇÕES:\n${avals.map(a=>`- ${st.criteria.find(x=>x.id===a.criterio_id).t}: nota ${a.nota}. ${a.motivo}`).join('\n')}`, schema:summarySchema},
-      o=>o.caminho?null:'caminho');
-    const out = {avaliacoes:avals, caminho:sum.caminho, ajuda:sum.ajuda||'',
-      estudar:(sum.estudar||[]).slice(0,4).map(e=>({conceito:e.conceito, doi:(e.doi||'').replace(/^https?:\/\/(dx\.)?doi\.org\//,'').trim(), doiOK:null}))};
-    c.result = out; c.status='done'; c.doneAt=nowISO(); c.provider=LLM.provider; c.mode='por-criterio';
-    logDiary(p, {stageId:st.id, stageName:st.name, kind:`crítica N${c.level}`, text:`Recomendação: ${out.caminho?.seguir||'?'} — ${out.caminho?.justificativa||''}`});
-    verifyDois(p, c);
-  }catch(e){ c.status = String(e.message).includes('indisponível') ? 'pending' : 'error'; c.error=e.message; toast('Crítica: '+e.message, 6000); }
-  delete S.busy[key]; touch(p); render();
-}
-async function verifyDois(p, c){
-  for (const e of c.result.estudar){ if(!e.doi){ e.doiOK=false; continue; }
-    try{ const r = await fetch('https://api.crossref.org/works/'+encodeURIComponent(e.doi)+(S.config.email?'?mailto='+encodeURIComponent(S.config.email):''));
-      if (r.ok){ const j=await r.json(); e.doiOK=true; e.ref=(j.message?.title?.[0]||'')+' ('+(j.message?.issued?.['date-parts']?.[0]?.[0]||'')+')'; } else e.doiOK=false; }
-    catch(err){ e.doiOK=false; } }
-  touch(p); if (S.view==='projeto') render();
-}
-
-/* ---------- Fila (pedidos feitos sem IA, ex.: no celular) ---------- */
-const Queue = {
-  pendingFor(p, stId){ return p.critiques.some(c=>c.stageId===stId && c.status==='pending'); },
-  async process(){
-    if (!LLM.online) return;
-    for (const p of S.projects) for (const c of p.critiques.filter(c=>c.status==='pending')){ await runCritique(p, c); }
-  },
-};
-
-/* ---------- Painel do crítico ---------- */
-function renderCritic(p, st){
-  const av = helpAvailability(p, st);
-  const all = p.critiques.filter(c=>c.stageId===st.id);
-  const lc = lastCritique(p, st.id); const pend = all.filter(c=>c.status==='pending'); const errs = all.filter(c=>c.status==='error').slice(-1);
-  const btn = l => `<button class="b ${l>1?'sec':''}" data-act="critique" data-l="${l}" ${av[l].length?'disabled':''} title="${esc(av[l].join(' '))}">Crítica N${l}</button>`;
-  let body='';
-  if (pend.length) body += `<p><span class="pill warn">${S.busy['crit_'+pend[0].id]?esc(typeof S.busy['crit_'+pend[0].id]==='string'?S.busy['crit_'+pend[0].id]:'Qwen avaliando…'):'Na fila — roda quando a IA estiver disponível'}</span> ${!S.busy['crit_'+pend[0].id]&&LLM.online?'<button class="b sec" data-act="runQueue">Processar agora</button>':''}</p>`;
-  if (errs.length && !lc) body += `<p class="pill bad">Erro: ${esc(errs[0].error)}</p>`;
-  if (lc){ const r=lc.result;
-    body += `<h3>Crítica N${lc.level} — ${fmtDate(lc.doneAt)} <span class="pill ${r.caminho?.seguir==='seguir'?'ok':r.caminho?.seguir==='abandonar'?'bad':'warn'}">${esc(r.caminho?.seguir||'')}</span></h3>
-      <p>${esc(r.caminho?.justificativa||'')}</p>
-      ${r.avaliacoes.map(a=>{ const cr=st.criteria.find(c=>c.id===a.criterio_id); const need=a.nota<=3; const d=lc.decisions[a.criterio_id];
-        return `<div class="crit ${cr.o?'obr':''}"><div class="row"><b>${esc(cr.t)}</b><span class="pill ${a.nota>=4?'ok':a.nota>=3?'warn':'bad'}">nota ${a.nota}</span>
-          <span class="small muted">sua: ${lc.selfSnapshot[a.criterio_id]??'—'}</span></div>
-          ${a.trecho?`<div class="quote">“${esc(a.trecho)}” ${a.trechoOK?'<span class="pill ok">trecho verificado</span>':(a.foraDoCampo?'<span class="pill bad">trecho de outro campo — não conta como evidência deste critério</span>':'<span class="pill bad">trecho não encontrado no seu texto — nota sem evidência</span>')}</div>`:'<div class="small muted">Sem trecho: o crítico não encontrou evidência no texto.</div>'}
-          ${a.contradicao?`<div class="small"><span class="pill warn">Atenção</span> O crítico diz que falta evidência, mas o campo «${esc(critFieldLabels(st,a.criterio_id).join(' + '))}» tem texto. Confira; se a crítica estiver errada, rejeite com essa justificativa.</div>`:''}
-          <div><b>Pergunta:</b> ${esc(a.pergunta)}</div><div class="small"><b>Motivo:</b> ${esc(a.motivo)}</div>
-          ${need?(d?`<div class="small" style="margin-top:4px"><span class="pill ${d.decision==='aceita'?'ok':d.decision==='rejeitada'?'bad':'warn'}">${d.decision}</span> ${esc(d.justification)}</div>`:
-            `<div class="row" style="margin-top:6px"><select id="dec_${a.criterio_id}" style="width:auto"><option value="">decisão…</option><option>aceita</option><option>rejeitada</option><option>adiada</option></select>
-             <input type="text" id="just_${a.criterio_id}" placeholder="Justificativa (obrigatória)" style="flex:1;min-width:200px"><button class="b sec" data-act="decide" data-k="${lc.id}" data-c="${a.criterio_id}">Registrar</button></div>`):''}
-        </div>`; }).join('')}
-      ${r.ajuda?`<h3>Ajuda N${lc.level}</h3><div class="crit">${esc(r.ajuda)}</div>`:''}
-      ${r.estudar?.length?`<h3>O que estudar</h3><ul>${r.estudar.map(e=>`<li>${esc(e.conceito)} ${e.doi? (e.doiOK===null?'<span class="pill">verificando DOI…</span>': e.doiOK?`<a href="https://doi.org/${esc(e.doi)}" target="_blank" rel="noopener">${esc(e.ref||e.doi)}</a> <span class="pill ok">DOI verificado</span>`:'<span class="pill warn">DOI não confirmado: busque o conceito</span>') : '<span class="pill">conceito para buscar</span>'}</li>`).join('')}</ul>`:''}`;
-  }
-  return `<div class="card"><h2>Crítico</h2><p class="small muted">O crítico não recebe a sua autoavaliação. Ele não reescreve o seu texto: pergunta, aponta o critério e diz por que seguir ou não. Cada nível de ajuda só abre depois de uma revisão sua.</p>
-    <div class="row">${btn(1)}${btn(2)}${btn(3)}</div>
-    ${[1,2,3].some(l=>av[l].length)?`<p class="small muted">${esc([...new Set([...av[1],...av[2],...av[3]])].join(' '))}</p>`:''}
-    ${body}</div>`;
-}
-ACTIONS.critique = async el => { const p=cur(); const st=STAGES[S.stage]; const l=Number(el.dataset.l); if (helpAvailability(p,st)[l].length) return; p.stages[st.id].helpLevel=Math.max(p.stages[st.id].helpLevel||0,l); await requestCritique(p, st, l); };
-ACTIONS.runQueue = async () => { await LLM.checkStatus(); await Queue.process(); };
-ACTIONS.decide = el => {
-  const p=cur(); const k=p.critiques.find(c=>c.id===el.dataset.k); const cid=el.dataset.c; const st=stageById(k.stageId);
-  const dec=$('#dec_'+cid).value; const just=$('#just_'+cid).value.trim();
-  if (!dec) return toast('Escolha a decisão.'); if (just.length<10) return toast('Justifique em pelo menos 10 caracteres.');
-  k.decisions[cid]={decision:dec, justification:just, at:nowISO()};
-  const a=k.result.avaliacoes.find(x=>x.criterio_id===cid); const cr=st.criteria.find(c=>c.id===cid);
-  logDiary(p, {stageId:st.id, stageName:st.name, kind:'decisão sobre crítica', text:`${cr.t} (nota ${a.nota}): ${a.pergunta}`, decision:dec, justification:just});
-  touch(p); render();
-};
 
 /* ---- lit.js ---- */
 /* ================= Literatura em escala (6.1) e auditoria da lacuna (6.2) ================= */
-const LIT_TABS = [['fontes','Fontes e buscas'],['triagem','Triagem'],['extracao','Extração'],['validacao','Validação'],['sintese','Síntese'],['nucleo','Núcleo'],['lacuna','Lacuna']];
+const LIT_TABS = [['fontes','Corpus e buscas'],['triagem','Triagem'],['extracao','Extração'],['validacao','Validação'],['sintese','Síntese'],['nucleo','Núcleo']];
 const included = p => p.lit.records.filter(r => r.override ? r.override==='incluir' : (r.triage && r.triage.dec!=='excluir'));
 const recById = (p,id) => p.lit.records.find(r=>r.id===id);
 const normDoi = d => String(d||'').toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//,'').replace(/^doi:\s*/,'').trim();
@@ -799,7 +310,7 @@ function addRecords(p, recs, sourceName){
   }
   return novos;
 }
-function logSearch(p, s){ p.lit.searches.push({id:uid('s'), at:nowISO(), ...s}); logDiary(p,{stageId:'s1', stageName:'Literatura', kind:'busca', text:`${s.fonte} (${s.tipo}): "${s.consulta}" → ${s.n} resultados, ${s.novos} novos`}); touch(p); }
+function logSearch(p, s){ p.lit.searches.push({id:uid('s'), at:nowISO(), ...s}); logDiary(p,{kind:'busca', text:`${s.fonte} (${s.tipo}): "${s.consulta}" → ${s.n} resultados, ${s.novos} novos`}); touch(p); }
 
 /* ---------- OpenAlex ---------- */
 function oaAbstract(inv){ if(!inv) return ''; const arr=[]; for (const [w,pos] of Object.entries(inv)) for (const i of pos) arr[i]=w; return arr.filter(x=>x!==undefined).join(' '); }
@@ -1020,7 +531,7 @@ async function coreRanking(p){
   const key = r => r.s2Id || r.openalexId; const ids=new Set(inc.map(key).filter(Boolean));
   for (const r of inc) for (const ref of [...(r.s2refs||[]), ...(r.refs||[])]) if (ids.has(ref)) cites[ref]=(cites[ref]||0)+1;
   const E=await getEmb(p); let qv=null;
-  const qtext = (p.stages.s2.fields.pergunta||'')+' '+(p.lit.gap.claim||'')+' '+(p.stages.s1.fields.tensao||'');
+  const qtext = (p.items.pergunta.fields.texto||'')+' '+(p.items.hipotese.fields.texto||'');
   if (Object.keys(E.vecs).length && qtext.trim().length>20){ try{ qv=unit((await LLM.embed([qtext]))[0]); }catch(e){} }
   const rows=inc.map(r=>({r, c:(cites[r.s2Id]||0)+(cites[r.openalexId]||0), g:r.citedBy||0, s: qv&&E.vecs[r.id]?dot(qv,E.vecs[r.id]):null}));
   const pct=(arr,key)=>{ const v=arr.map(x=>x[key]??-1); const sorted=[...v].sort((a,b)=>a-b); return x=>sorted.filter(y=>y<(x[key]??-1)).length/Math.max(1,sorted.length-1); };
@@ -1071,7 +582,7 @@ ACTIONS.declareGap = () => { const p=cur(); const c=gapConditions(p); if(c.lengt
 ACTIONS.suggestTerms = async () => { const p=cur(); if(!p.lit.searches.length) return toast('Faça sua primeira busca antes (ajuda de nível 2).');
   S.busy.terms=true; render();
   try{ const out=await LLM.chatValid({system:'Você ajuda a revisar estratégias de busca bibliográfica em sensoriamento remoto e ciências ambientais. Sugira termos, sinônimos e variações em inglês e português que estão AUSENTES das consultas já feitas e que poderiam trazer estudos relevantes. Não sugira conclusões sobre a lacuna. Português.',
-      user:`AFIRMAÇÃO OU TEMA:\n${p.lit.gap.claim||p.stages.s2.fields.pergunta||p.title}\n\nCONSULTAS JÁ FEITAS:\n${p.lit.searches.map(s=>'- '+s.consulta).join('\n')}`,
+      user:`AFIRMAÇÃO OU TEMA:\n${p.items.pergunta.fields.texto||p.title}\n\nCONSULTAS JÁ FEITAS:\n${p.lit.searches.map(s=>'- '+s.consulta).join('\n')}`,
       schema:{type:'object',required:['termos'],properties:{termos:{type:'array',items:{type:'object',required:['termo','por_que'],properties:{termo:{type:'string'},por_que:{type:'string'}}}}}}}, o=>Array.isArray(o.termos)?null:'termos');
     p.lit.termSuggestions={at:nowISO(), termos:out.termos.slice(0,15)}; logDiary(p,{stageId:'s1',stageName:'Literatura',kind:'ajuda N2',text:'Sugestão de termos: '+out.termos.map(t=>t.termo).join(', ')}); }
   catch(e){ toast(e.message,6000); } delete S.busy.terms; touch(p); render(); };
@@ -1081,11 +592,11 @@ function recLine(r, extra=''){ return `<div class="rec"><div class="t">${esc(r.t
 function renderLit(p){
   const tab=S.litTab; const L=p.lit;
   const tabs=`<div class="tabs">${LIT_TABS.map(([k,l])=>`<button class="${tab===k?'on':''}" data-act="litTab" data-t="${k}">${l}</button>`).join('')}</div>`;
-  const head=`<div class="card"><h2>Literatura — ${esc(p.title)}</h2><p class="small muted">A IA lê e extrai; o código agrega; você define o que extrair e interpreta. ${LLM.online?'':'<b>IA offline:</b> buscas e importações funcionam; triagem, extração e grupos exigem o Qwen.'}</p>
-    <div><span class="kpi"><b>${L.records.length}</b><span class="small muted">registros</span></span><span class="kpi"><b>${L.records.filter(r=>r.triage||r.override).length}</b><span class="small muted">triados</span></span><span class="kpi"><b>${included(p).length}</b><span class="small muted">incluídos</span></span><span class="kpi"><b>${L.records.filter(r=>r.extract).length}</b><span class="small muted">extraídos</span></span><span class="kpi"><b>${gapDeclared(p)?'sim':'não'}</b><span class="small muted">lacuna declarada</span></span></div></div>`;
+  const head=`<div class="card"><h2>Literatura — ${esc(p.title)}</h2><p class="small muted">Corpus do projeto: as análises de pergunta, hipótese e contrafactual buscam e acumulam artigos aqui. As abas Triagem a Núcleo servem para uma revisão sistemática formal, quando você precisar. ${LLM.online?'':'<b>IA offline:</b> buscas e importações funcionam; triagem, extração e grupos exigem o Qwen.'}</p>
+    <div><span class="kpi"><b>${L.records.length}</b><span class="small muted">registros</span></span><span class="kpi"><b>${L.records.filter(r=>r.triage||r.override).length}</b><span class="small muted">triados</span></span><span class="kpi"><b>${included(p).length}</b><span class="small muted">incluídos</span></span><span class="kpi"><b>${L.records.filter(r=>r.extract).length}</b><span class="small muted">extraídos</span></span></div></div>`;
   let body='';
   if (tab==='fontes') body=litFontes(p); else if (tab==='triagem') body=litTriagem(p); else if (tab==='extracao') body=litExtracao(p);
-  else if (tab==='validacao') body=litValidacao(p); else if (tab==='sintese') body=litSintese(p); else if (tab==='nucleo') body=litNucleo(p); else body=litLacuna(p);
+  else if (tab==='validacao') body=litValidacao(p); else if (tab==='sintese') body=litSintese(p); else body=litNucleo(p);
   return head+tabs+body;
 }
 ACTIONS.litTab = el => { S.litTab=el.dataset.t; render(); };
@@ -1217,109 +728,420 @@ function litLacuna(p){
     <button class="b" data-act="declareGap" ${cond.length?'disabled':''}>Declarar lacuna não refutada</button>`}</div>`;
 }
 
-/* ---- extras.js ---- */
-/* ================= Métricas, configurações, exportação, sincronização ================= */
-function critiqueCalib(c){ const d=[]; for (const a of c.result.avaliacoes){ const s=c.selfSnapshot[a.criterio_id]; if (Number.isInteger(s)) d.push(Math.abs(s-a.nota)); } return d.length? d.reduce((x,y)=>x+y,0)/d.length : null; }
-function renderMetrics(){
-  const all=S.projects; const done=all.flatMap(p=>p.critiques.filter(c=>c.status==='done').map(c=>({p,c,cal:critiqueCalib(c)}))).sort((a,b)=>a.c.doneAt<b.c.doneAt?-1:1);
-  const cals=done.map(x=>x.cal).filter(x=>x!=null); const avg=a=>a.length?(a.reduce((x,y)=>x+y,0)/a.length):null;
-  const first=avg(cals.slice(0,3)), last=avg(cals.slice(-3));
-  const gates=all.flatMap(p=>Object.entries(p.gates).map(([sid,g])=>({p,st:stageById(sid),g})));
-  const lv={1:0,2:0,3:0}; done.forEach(x=>lv[x.c.level]++);
-  const dec=all.flatMap(p=>p.critiques.flatMap(c=>Object.values(c.decisions||{}))); const rej=dec.filter(d=>d.decision==='rejeitada').length;
-  const zero={}; for (const p of all){ for (const st of STAGES){ const lc=lastCritique(p,st.id); if(!lc) continue; for (const a of lc.result.avaliacoes) if (a.nota<=1){ (zero[a.criterio_id] ||= new Set()).add(p.id); } } }
-  const recurrent=Object.entries(zero).filter(([,s])=>s.size>1).map(([cid,s])=>{ const st=STAGES.find(x=>x.criteria.some(c=>c.id===cid)); return {t:st.criteria.find(c=>c.id===cid).t, st:st.name, n:s.size}; });
-  const f=x=>x==null?'—':x.toFixed(2);
-  return `<div class="card"><h2>Métricas de evolução</h2><p class="small muted">Medem a sua habilidade, não a ajuda da IA. A nota do crítico não é verdade de referência; a validação externa vem dos pareceres reais dos periódicos.</p>
-    <span class="kpi"><b>${f(avg(cals))}</b><span class="small muted">calibração média |sua − crítico|</span></span>
-    <span class="kpi"><b>${f(first)} → ${f(last)}</b><span class="small muted">3 primeiras → 3 últimas críticas</span></span>
-    <span class="kpi"><b>${gates.length?avg(gates.map(x=>x.g.rounds)).toFixed(1):'—'}</b><span class="small muted">rodadas por portão</span></span>
-    <span class="kpi"><b>${lv[1]} / ${lv[2]} / ${lv[3]}</b><span class="small muted">ajuda N1 / N2 / N3</span></span>
-    <span class="kpi"><b>${dec.length?Math.round(100*rej/dec.length)+'%':'—'}</b><span class="small muted">críticas rejeitadas com justificativa</span></span></div>
-  <div class="card"><h2>Calibração por crítica</h2><table><tr><th>Data</th><th>Projeto</th><th>Estágio</th><th>Nível</th><th>|sua − crítico|</th></tr>${done.map(x=>`<tr><td class="small">${fmtDate(x.c.doneAt)}</td><td>${esc(x.p.title)}</td><td>${esc(stageById(x.c.stageId).name)}</td><td>N${x.c.level}</td><td>${f(x.cal)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">Sem críticas ainda.</td></tr>'}</table></div>
-  <div class="card"><h2>Portões</h2><table><tr><th>Projeto</th><th>Estágio</th><th>Rodadas</th><th>Tempo ativo</th><th>Discordância do crítico</th><th>Data</th></tr>${gates.map(x=>`<tr><td>${esc(x.p.title)}</td><td>${esc(x.st.name)}</td><td>${x.g.rounds}</td><td>${Math.round((x.g.time||0)/60)} min</td><td>${x.g.disagree?.length||0}</td><td class="small">${fmtDate(x.g.at)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Nenhum portão ainda.</td></tr>'}</table></div>
-  <div class="card"><h2>Erros recorrentes</h2><p class="small muted">Critérios com nota 0 ou 1 do crítico em mais de um projeto.</p>${recurrent.length?`<ul>${recurrent.map(r=>`<li>${esc(r.st)} — ${esc(r.t)} (${r.n} projetos)</li>`).join('')}</ul>`:'<p class="muted">Nenhum até agora.</p>'}</div>`;
+/* ---- items.js ---- */
+/* ================= Itens (pergunta, hipótese, contrafactual) analisados contra a literatura ================= */
+/* Critérios a partir das revisões trazidas pelo pesquisador (Consensus, 19/11/2026). src: lit = avaliado contra a literatura; texto = no próprio texto; cadeia = coerência com o item anterior; revista = o que a revista publica. */
+const ITEMS = {
+ pergunta:{ name:'Pergunta de pesquisa', cls:'o artigo já responde a esta pergunta de pesquisa (mesmo fenômeno, mesma pergunta, contexto equivalente)',
+  fields:[{id:'texto', label:'Pergunta de pesquisa', rows:3, ph:'Uma frase: por quê, como ou com que erro…'}],
+  criteria:[
+   {id:'novidade', t:'Novidade', src:'lit', novelty:true, d:'A pergunta não foi feita antes ou é respondida de forma melhor (Sovacool et al., 2018; Husein et al., 2025).'},
+   {id:'originalidade', t:'Originalidade', src:'lit', d:'Contribuição original frente à literatura prévia: na ideia, na pergunta, na abordagem ou no método (Sairally, 2025; Buckley, 2022).'},
+   {id:'relevancia', t:'Impacto e relevância', src:'lit', d:'Aborda lacuna significativa e informa o campo independentemente da direção do resultado (George, 2024).'},
+   {id:'rigor', t:'Rigor metodológico', src:'texto', d:'Respondível, delimitada em unidade, população, espaço e tempo, não respondível por sim/não, e permite um desenho robusto e reprodutível (FINER e PICO; Sovacool et al., 2018; Ratan et al., 2018).'},
+   {id:'escopo', t:'Alinhamento com a revista', src:'revista', d:'O tema é compatível com o que a revista-alvo publica (Plakias, 2026; Sairally, 2026).'} ] },
+ hipotese:{ name:'Hipótese', cls:'o artigo já testa esta hipótese ou uma equivalente',
+  fields:[{id:'texto', label:'Hipótese', rows:3, ph:'Uma proposição falseável que responde à pergunta…'},{id:'teste', label:'Previsão observável e como será testada', rows:3, ph:'O que se espera observar, com que dado, métrica e critério de decisão…'}],
+  criteria:[
+   {id:'testabilidade', t:'Testabilidade (5E)', src:'texto', d:'Explícita, baseada em evidências, formulada antes dos dados, com poder explicativo e empiricamente testável/falseável (Ghasemi et al., 2025; Pulina, 2025).'},
+   {id:'novidade', t:'Novidade', src:'lit', novelty:true, d:'Propõe mecanismo ou associação além do conhecimento vigente (Shiyang et al., 2025; Yang et al., 2024).'},
+   {id:'fundamentacao', t:'Fundamentação na literatura', src:'lit', d:'Ancorada em evidências e teoria existentes, sem repetir combinações já extensamente testadas (Charles et al., 2025; Vasu et al., 2026).'},
+   {id:'viabilidade', t:'Viabilidade', src:'lit', d:'Testável com dados e métodos que a literatura mostra estarem disponíveis (Shiyang et al., 2025; Gottweis et al., 2026).'},
+   {id:'rigor', t:'Rigor metodológico', src:'texto', d:'Desfechos mensuráveis, controles, métrica e plano de análise definidos; não vaga nem trivial (Ho et al., 2026; Gottweis et al., 2026).'},
+   {id:'coerencia', t:'Coerência com a pergunta', src:'cadeia', of:'pergunta', d:'A hipótese é uma resposta predita à pergunta de pesquisa (Ghasemi et al., 2025; Covvey et al., 2023).'} ] },
+ contrafactual:{ name:'Contrafactual', cls:'o artigo usa um contrafactual ou desenho de comparação equivalente para este mesmo problema',
+  fields:[{id:'texto', label:'Contrafactual: o que se observaria sem a causa ou intervenção, e como será construído', rows:4, ph:'Áreas ou períodos de comparação, desenho, fonte de dados…'},{id:'pressupostos', label:'Pressupostos de identificação', rows:3, ph:'O que precisa ser verdade para a comparação ser válida…'}],
+  criteria:[
+   {id:'plausibilidade', t:'Plausibilidade', src:'lit', d:'Mudança pequena e imaginável a partir do mundo real, não "milagrosa" (Levy, 2015; King e Zeng, 2007).'},
+   {id:'consistencia', t:'Consistência teórica', src:'lit', d:'Coerente com generalizações teóricas empiricamente validadas (Levy, 2015).'},
+   {id:'proximidade', t:'Proximidade dos dados', src:'lit', d:'O cenário contrafactual fica perto dos dados disponíveis, evitando dependência de modelo (King e Zeng, 2005; 2007).'},
+   {id:'identificabilidade', t:'Identificabilidade', src:'texto', d:'Diz como o efeito é identificado a partir dos dados (desenho, controles, confundidores) ou declara limites (Balakrishnan et al., 2025; O’Garra et al., 2025).'},
+   {id:'pressupostos', t:'Pressupostos explícitos', src:'texto', d:'Pressupostos declarados e verificáveis, com validação contra padrões observados antes da intervenção ou em controles (Magliocca et al., 2023).'},
+   {id:'coerencia', t:'Coerência com a hipótese', src:'cadeia', of:'hipotese', d:'O contrafactual permite testar a hipótese.'} ] },
+};
+const STATUS = {atende:['ok','atende'], parcial:['warn','parcial'], nao_atende:['bad','não atende'], sem_dados:['','sem dados']};
+const SRC_LABEL = {lit:'literatura', texto:'texto', cadeia:'coerência', revista:'revista'};
+const itemText = (p, key) => ITEMS[key].fields.map(f=>(p.items[key].fields[f.id]||'').trim()).filter(Boolean).join('\n');
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+/* ---------- Semantic Scholar bulk ---------- */
+async function s2Bulk(query, max, extra=''){
+  const out=[]; let token=null, total=null;
+  do { const u=`https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodeURIComponent(query)}&fields=${S2F}${extra}${token?'&token='+encodeURIComponent(token):''}`;
+    const j=await s2Fetch(u); total=j.total; out.push(...(j.data||[]).map(s2Map)); token=j.token; if (token && out.length<max) await sleep(1100);
+  } while (token && out.length<max);
+  return {total, data:out.slice(0,max)};
 }
+
+/* ---------- Análise ---------- */
+function setStep(key, msg, done, total){ S.busy['an_'+key]={...(S.busy['an_'+key]||{}), msg, done, total}; if (S.view===key) render(); }
+const stopped = key => S.busy['an_'+key]?.stop;
+ACTIONS.stopAnalysis = el => { const b=S.busy['an_'+el.dataset.k]; if(b) b.stop=true; };
+
+async function analyzeItem(p, key){
+  const def=ITEMS[key]; const text=itemText(p, key); const it=p.items[key];
+  if (S.busy['an_'+key]) return;
+  if (text.length<20) return toast('Escreva o item antes de analisar.');
+  S.busy['an_'+key]={msg:'Preparando…'}; render();
+  if (!(await LLM.checkStatus()) || LLM.provider!=='ollama'){ delete S.busy['an_'+key]; render(); return toast('A análise usa o Qwen e os embeddings no PC: abra o Descartes no computador com o Ollama ligado.', 7000); }
+  const k=Math.max(10, Math.min(300, Number(S.config.k)||100)); const per=Math.max(50, Math.min(2000, Number(S.config.perQuery)||300));
+  const A={id:uid('a'), at:nowISO(), textHash:hashStr(text), text, k, queries:[], totals:[], criteria:[], summary:[], top:[], warnings:[]};
+  try{
+    /* 1. Consultas: as suas, se você escreveu; senão o Qwen propõe */
+    let queries = (it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
+    if (!queries.length){
+      setStep(key,'Gerando consultas de busca…');
+      queries=(await generateQueries(key, text)).map(x=>x.consulta); it.queries=queries.join('\n');
+    }
+    A.queries=queries;
+    /* 2. Busca e acúmulo no corpus do projeto */
+    for (const [i,q] of queries.entries()){
+      if (stopped(key)) throw new Error('interrompida');
+      setStep(key,`Buscando no Semantic Scholar (${i+1}/${queries.length})…`);
+      try{ const r=await s2Bulk(q, per); const novos=addRecords(p, r.data, 'Semantic Scholar');
+        logSearch(p,{fonte:'Semantic Scholar (bulk)', consulta:q, tipo:'termos', n:r.data.length, novos, total:r.total, item:key}); A.totals.push({q, total:r.total, got:r.data.length, novos}); }
+      catch(e){ A.warnings.push(`Busca "${q}" falhou: ${e.message}. A análise usa o corpus já existente.`); }
+      await sleep(1100);
+    }
+    /* 3. Embeddings e ordenação por proximidade */
+    const E=await getEmb(p); if (E.model!==S.config.embedModel){ E.model=S.config.embedModel; E.vecs={}; }
+    const cand=p.lit.records.filter(r=>r.abstract && r.override!=='excluir');
+    const todo=cand.filter(r=>!E.vecs[r.id]);
+    for (let i=0;i<todo.length;i+=32){ if (stopped(key)) throw new Error('interrompida');
+      setStep(key,'Calculando embeddings…', i, todo.length);
+      const b=todo.slice(i,i+32); const vs=await LLM.embed(b.map(r=>(r.title+'. '+r.abstract).slice(0,2000))); b.forEach((r,j)=>E.vecs[r.id]=unit(vs[j])); }
+    await DB.put('kv', E, 'emb:'+p.id);
+    const qv=unit((await LLM.embed([text]))[0]);
+    const ranked=cand.map(r=>({r, s:dot(qv,E.vecs[r.id])})).sort((a,b)=>b.s-a.s);
+    const top=ranked.slice(0,k); A.corpusN=cand.length; A.semResumo=p.lit.records.filter(r=>!r.abstract).length;
+    if (top.length<k) A.warnings.push(`O corpus tem só ${top.length} artigos com resumo; a análise leu todos.`);
+    /* 4. Leitura dos k mais próximos (com cache por versão do item) */
+    const ck=key+'|'+A.textHash;
+    for (const [i,x] of top.entries()){
+      if (stopped(key)) throw new Error('interrompida');
+      setStep(key,`Lendo os artigos mais próximos (${i+1}/${top.length})…`, i, top.length);
+      const r=x.r; r.cls ||= {};
+      if (!r.cls[ck]){
+        const src=r.title+'\n'+r.abstract;
+        const o=await LLM.chatValid({system:`Você compara um artigo científico com um item de pesquisa. Use SOMENTE o título e o resumo. "ja_responde": ${def.cls}; "em_parte": trata do mesmo problema, mas em outro contexto, com outra abordagem ou só em parte; "nao_responde": não trata do item. "trecho": cópia literal de até 160 caracteres do resumo que justifica. Português.`,
+          user:`ITEM (${def.name}):\n${text}\n\nTÍTULO: ${r.title}\nRESUMO: ${r.abstract}`, schema:{type:'object',required:['classe','trecho'],properties:{classe:{type:'string',enum:['ja_responde','em_parte','nao_responde']},trecho:{type:'string'}}}},
+          o=>['ja_responde','em_parte','nao_responde'].includes(o.classe)?null:'classe');
+        const ok=quoteOK(o.trecho, src);
+        r.cls[ck]={classe: (!ok && o.classe!=='nao_responde') ? 'em_parte' : o.classe, trecho:o.trecho, ok};
+      }
+      A.top.push({id:r.id, s:+x.s.toFixed(3), classe:r.cls[ck].classe});
+      if (i%10===9) touch(p);
+    }
+    /* 5. Índice de sobreposição/novidade e saturação */
+    const ind = n => { const sl=A.top.slice(0,n); const ja=sl.filter(t=>t.classe==='ja_responde').length, pa=sl.filter(t=>t.classe==='em_parte').length; return {n:sl.length, ja, pa, idx: sl.length? Math.round(100*(1-(ja+0.5*pa)/sl.length)) : null}; };
+    A.sat=[15,50,A.top.length].filter((n,i,a)=>n<=A.top.length && a.indexOf(n)===i).map(ind);
+    A.novelty=ind(A.top.length).idx;
+    const tail=A.top.slice(Math.floor(A.top.length*2/3)); A.saturou = !tail.some(t=>t.classe==='ja_responde');
+    if (!A.saturou) A.warnings.push('Ainda aparecem artigos que já respondem ao item no último terço da lista: aumente o número de artigos lidos ou revise as consultas.');
+    /* 6. Cartões por critério (um critério por chamada) */
+    const evid = () => { const rel=A.top.filter(t=>t.classe!=='nao_responde').slice(0,8); const rest=A.top.filter(t=>t.classe==='nao_responde').slice(0,12-rel.length);
+      return [...rel,...rest].map((t,i)=>({code:'A'+(i+1), r:recById(p,t.id), classe:t.classe})); };
+    for (const [i,c] of def.criteria.entries()){
+      if (stopped(key)) throw new Error('interrompida');
+      setStep(key,`Avaliando critérios (${i+1}/${def.criteria.length}): ${c.t}…`);
+      A.criteria.push(await evalCriterion(p, key, c, text, A, evid));
+      touch(p);
+    }
+    /* 7. Resumo da literatura (hierárquico, em blocos de 20) */
+    const blocks=[]; for (let i=0;i<A.top.length;i+=20) blocks.push(A.top.slice(i,i+20));
+    const partial=[];
+    for (const [bi,b] of blocks.entries()){
+      if (stopped(key)) throw new Error('interrompida');
+      setStep(key,`Resumindo a literatura (bloco ${bi+1}/${blocks.length})…`);
+      const codes=b.map((t,j)=>['R'+(bi*20+j+1), t.id]);
+      const o=await LLM.chatValid({system:'Resuma o que este conjunto de artigos diz sobre o item, em 2 a 3 frases objetivas (dados, métodos, achados, limites). Cada frase deve listar em "ids" os códigos (R…) dos artigos que a sustentam. Não afirme nada que os resumos não digam. Português.',
+        user:`ITEM:\n${text}\n\n`+codes.map(([c,id])=>{const r=recById(p,id); return `${c}: ${r.title} (${r.year||'s.d.'}). ${(r.abstract||'').slice(0,450)}`;}).join('\n\n'), schema:frasesSchema}, o=>Array.isArray(o.frases)?null:'frases');
+      const valid=new Map(codes); partial.push(...o.frases.map(f=>({texto:f.texto, ids:(f.ids||[]).filter(c=>valid.has(c))})).filter(f=>f.ids.length));
+    }
+    setStep(key,'Consolidando o resumo…');
+    const codeMap=new Map(A.top.map((t,i)=>['R'+(i+1), t.id]));
+    if (partial.length){
+      const o=await LLM.chatValid({system:'Consolide as frases abaixo num resumo de 4 a 6 frases sobre o estado da literatura em relação ao item: o que já se sabe, como se estuda e o que falta. Mantenha em "ids" apenas códigos R… presentes nas frases de origem. Português.',
+        user:`ITEM:\n${text}\n\nFRASES:\n`+partial.map(f=>`- ${f.texto} [${f.ids.join(', ')}]`).join('\n'), schema:frasesSchema}, o=>Array.isArray(o.frases)?null:'frases');
+      A.summary=o.frases.map(f=>({texto:f.texto, ids:(f.ids||[]).filter(c=>codeMap.has(c)).map(c=>codeMap.get(c))})).filter(f=>f.ids.length);
+    }
+    it.analyses.push(A); logDiary(p,{kind:'análise', item:key, text:`${def.name}: índice de novidade ${A.novelty}; `+A.criteria.map(c=>`${c.t}: ${STATUS[c.status][1]}`).join('; ')});
+    toast('Análise concluída.');
+  }catch(e){ if (e.message!=='interrompida') toast('Análise: '+e.message, 8000); else toast('Análise interrompida.'); }
+  delete S.busy['an_'+key]; touch(p); render();
+}
+async function generateQueries(key, text){
+  const q=await LLM.chatValid({system:'Você monta consultas para a API de busca do Semantic Scholar (busca no título e no resumo). Sintaxe: "frase exata", + (e), | (ou), - (excluir), parênteses. Gere de 2 a 3 consultas em inglês, complementares: cada uma cobre um ângulo do item (fenômeno, método ou dado, contexto). Específicas o bastante para trazer os estudos mais próximos e amplas o bastante para não perder sinônimos. Não invente siglas. Em "objetivo", diga em português, em até 15 palavras, que parte do item a consulta cobre.',
+    user:`ITEM (${ITEMS[key].name}):\n${text}`, schema:{type:'object',required:['consultas'],properties:{consultas:{type:'array',items:{type:'object',required:['consulta','objetivo'],properties:{consulta:{type:'string'},objetivo:{type:'string'}}}}}}},
+    o=>Array.isArray(o.consultas)&&o.consultas.length&&o.consultas.every(x=>x.consulta)?null:'consultas');
+  return q.consultas.slice(0,3).map(x=>({consulta:x.consulta.trim(), objetivo:(x.objetivo||'').trim()})).filter(x=>x.consulta);
+}
+ACTIONS.suggestQueries = async el => {
+  const p=cur(), key=el.dataset.k, it=p.items[key], text=itemText(p,key);
+  if (text.length<20) return toast('Escreva o item antes.');
+  if (it.queries?.trim() && !confirm('Substituir as consultas atuais pelas sugeridas?')) return;
+  S.busy['q_'+key]='Qwen sugerindo consultas…'; render();
+  try{ const qs=await generateQueries(key, text); it.queries=qs.map(x=>x.consulta).join('\n'); it.queryNotes=Object.fromEntries(qs.map(x=>[x.consulta,x.objetivo])); it.queryPreview=null; touch(p); }
+  catch(e){ toast('Sugestão: '+e.message, 7000); }
+  delete S.busy['q_'+key]; render();
+};
+ACTIONS.previewQueries = async el => {
+  const p=cur(), key=el.dataset.k, it=p.items[key]; const qs=(it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  if (!qs.length) return toast('Escreva ou sugira as consultas primeiro.');
+  S.busy['q_'+key]='Testando consultas no Semantic Scholar…'; render(); const prev=[];
+  for (const q of qs){
+    try{ const j=await s2Fetch(`https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodeURIComponent(q)}&fields=title,year,citationCount&sort=citationCount:desc`);
+      prev.push({q, total:j.total??(j.data||[]).length, top:(j.data||[]).slice(0,5).map(d=>({title:d.title, year:d.year, c:d.citationCount}))}); }
+    catch(e){ prev.push({q, erro:e.message}); }
+    await sleep(1100);
+  }
+  it.queryPreview={at:nowISO(), hash:hashStr(it.queries), list:prev}; touch(p); delete S.busy['q_'+key]; render();
+};
+function renderQueries(p, key){
+  const it=p.items[key], busy=S.busy['q_'+key]; const qs=(it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const pv = it.queryPreview && it.queryPreview.hash===hashStr(it.queries||'') ? it.queryPreview.list : null;
+  const notes=it.queryNotes||{};
+  const flag=t=> t>5000?'<span class="pill warn">ampla demais</span>':t<20?'<span class="pill warn">restrita demais</span>':'<span class="pill ok">bom tamanho</span>';
+  return `<div class="crit" style="margin-top:10px"><div class="row"><b>1. Consultas de busca</b><span class="small muted">uma por linha · "frase exata", + (e), | (ou), - (excluir), parênteses</span></div>
+    <textarea id="it_${key}_q" rows="3" data-bind="items.${key}.queries" data-rerender="1" placeholder="Clique em Sugerir para o Qwen propor a partir do seu texto">${esc(it.queries||'')}</textarea>
+    ${qs.some(q=>notes[q])?`<ul class="small" style="margin:4px 0">${qs.filter(q=>notes[q]).map(q=>`<li><code>${esc(q)}</code> — ${esc(notes[q])}</li>`).join('')}</ul>`:''}
+    <div class="row" style="margin-top:6px">${busy?`<span class="pill warn">${esc(busy)}</span>`:`<button class="b sec" data-act="suggestQueries" data-k="${key}" ${LLM.online?'':'disabled'}>Sugerir consultas</button><button class="b sec" data-act="previewQueries" data-k="${key}" ${qs.length?'':'disabled'}>Testar consultas</button>`}</div>
+    ${pv?pv.map(x=>`<div class="small" style="margin-top:6px"><code>${esc(x.q)}</code> ${x.erro?`<span class="pill bad">${esc(x.erro)}</span>`:`→ <b>${x.total}</b> artigos ${flag(x.total)}<div class="muted">Mais citados: ${x.top.map(t=>`${esc(t.title)} (${t.year||''})`).join(' · ')||'—'}</div>`}</div>`).join(''):(qs.length?'<p class="small muted">Teste as consultas para ver quantos artigos cada uma traz antes de analisar.</p>':'')}</div>`;
+}
+const frasesSchema={type:'object',required:['frases'],properties:{frases:{type:'array',items:{type:'object',required:['texto','ids'],properties:{texto:{type:'string'},ids:{type:'array',items:{type:'string'}}}}}}};
+const cardSchema = withQuote => ({type:'object', required:['status','justificativa','sugestao', withQuote?'trecho':'ids'], properties:{
+  status:{type:'string',enum:['atende','parcial','nao_atende']}, justificativa:{type:'string'}, sugestao:{type:'string'},
+  ...(withQuote?{trecho:{type:'string'}}:{ids:{type:'array',items:{type:'string'}}})}});
+const CARD_SYS = c => `Você é um revisor de periódico Q1 em sensoriamento remoto, geoprocessamento e ciências ambientais. Avalie UM critério: "${c.t}" — ${c.d}
+Responda com: "status" (atende, parcial ou nao_atende), "justificativa" (até 60 palavras, específica), "sugestao" (onde e como melhorar, até 60 palavras; não reescreva o item inteiro). Seja rigoroso: na dúvida, "parcial". Português.`;
+
+async function evalCriterion(p, key, c, text, A, evid){
+  const base={id:c.id, t:c.t, src:c.src};
+  if (c.src==='texto'){
+    const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"trecho": cópia literal do item que justifica o status, ou "" se o item não trata do critério.', user:`ITEM:\n${text}`, schema:cardSchema(true)}, o=>STATUS[o.status]?null:'status');
+    return {...base, ...o, trechoOK:o.trecho?quoteOK(o.trecho,text):false};
+  }
+  if (c.src==='cadeia'){
+    const other=itemText(p, c.of); if (other.length<20) return {...base, status:'sem_dados', justificativa:`Escreva ${ITEMS[c.of].name.toLowerCase()} para avaliar a coerência.`, sugestao:''};
+    const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"trecho": cópia literal do ITEM que mostra a ligação, ou "".', user:`${ITEMS[c.of].name.toUpperCase()}:\n${other}\n\nITEM (${ITEMS[key].name}):\n${text}`, schema:cardSchema(true)}, o=>STATUS[o.status]?null:'status');
+    return {...base, ...o, trechoOK:o.trecho?quoteOK(o.trecho,text):false};
+  }
+  if (c.src==='revista'){
+    const j=p.journal; if (!j?.name) return {...base, status:'sem_dados', justificativa:'Escolha a revista-alvo no topo desta tela.', sugestao:''};
+    let rs={total:0,data:[]}; const y=new Date().getFullYear();
+    try{ rs=await s2Bulk(A.queries[0]||text.slice(0,120), 40, `&venue=${encodeURIComponent(j.name)}&year=${y-5}-${y}`); }catch(e){ return {...base, status:'sem_dados', justificativa:'Não foi possível consultar os artigos da revista: '+e.message, sugestao:''}; }
+    if (!rs.data.length) return {...base, status:'nao_atende', justificativa:`Nenhum artigo de ${j.name} dos últimos 5 anos apareceu com os termos do item.`, sugestao:'Confira se o tema cabe na revista ou se as consultas estão estreitas demais; compare com outra revista do catálogo.', venueN:0};
+    const ev=rs.data.slice(0,10).map((r,i)=>({code:'J'+(i+1), r}));
+    const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"ids": códigos J… dos artigos da revista mais próximos do item.', user:`REVISTA: ${j.name}\nITEM:\n${text}\n\nARTIGOS RECENTES DA REVISTA COM TERMOS PRÓXIMOS (${rs.total} no total):\n`+ev.map(x=>`${x.code}: ${x.r.title} (${x.r.year||''}). ${(x.r.abstract||'').slice(0,300)}`).join('\n'), schema:cardSchema(false)}, o=>STATUS[o.status]?null:'status');
+    const m=new Map(ev.map(x=>[x.code,x.r])); return {...base, ...o, venueN:rs.total, venueRefs:(o.ids||[]).filter(x=>m.has(x)).map(x=>({title:m.get(x).title, year:m.get(x).year, doi:m.get(x).doi}))};
+  }
+  // literatura
+  const ev=evid(); const m=new Map(ev.map(x=>[x.code,x.r.id]));
+  const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"ids": códigos A… dos artigos que sustentam a avaliação. Baseie-se nos artigos fornecidos.', user:`ITEM:\n${text}\n\n${c.novelty?`ÍNDICE DE NOVIDADE CALCULADO: ${A.novelty} (de 0 a 100; quanto menor, mais artigos já respondem).\n\n`:''}ARTIGOS MAIS PRÓXIMOS (classificação prévia entre colchetes):\n`+ev.map(x=>`${x.code} [${x.classe}]: ${x.r.title} (${x.r.year||''}). ${(x.r.abstract||'').slice(0,350)}`).join('\n'), schema:cardSchema(false)}, o=>STATUS[o.status]?null:'status');
+  let status=o.status;
+  if (c.novelty){ const ja=A.top.filter(t=>t.classe==='ja_responde').length;   // o status da novidade vem do índice e da contagem, não da opinião do modelo
+    status = (ja>=3 || A.novelty<40) ? 'nao_atende' : (ja>=1 || A.novelty<70) ? 'parcial' : 'atende'; }
+  return {...base, ...o, status, ids:(o.ids||[]).filter(x=>m.has(x)).map(x=>m.get(x))};
+}
+ACTIONS.analyze = el => analyzeItem(cur(), el.dataset.k);
+
+/* ---------- Renderização ---------- */
+const refShort = r => r ? `${esc((r.authors||'').split(/[;,]/)[0].trim().split(' ').pop()||'s.a.')} ${r.year||''}` : '';
+const refLink = r => r ? (r.doi?`<a href="https://doi.org/${esc(r.doi)}" target="_blank" rel="noopener" title="${esc(r.title)}">${refShort(r)}</a>`:`<span title="${esc(r.title)}">${refShort(r)}</span>`) : '';
+function journalPicker(p){
+  const j=p.journal; const opts=S.catalog.slice(0,3000).map(c=>`<option value="${esc(c.nome)}">`).join('');
+  const links = j ? [j.pagina&&`<a href="${esc(j.pagina)}" target="_blank" rel="noopener">Página</a>`, j.normas&&`<a href="${esc(j.normas)}" target="_blank" rel="noopener">Normas</a>`, j.escopo&&`<a href="${esc(j.escopo)}" target="_blank" rel="noopener">Escopo</a>`].filter(Boolean).join(' · ') : '';
+  return `<div class="row small"><label>Revista-alvo</label><input type="text" id="jrnl" list="dlJ" style="max-width:360px" value="${esc(j?.name||'')}" placeholder="${S.catalog.length?'escolha do catálogo do LabResearch':'nome da revista'}"><datalist id="dlJ">${opts}</datalist><button class="b sec" data-act="setJournal">Definir</button>${j?.qualis?`<span class="pill">Qualis ${esc(j.qualis)}</span>`:''} ${links}</div>`;
+}
+ACTIONS.setJournal = () => { const p=cur(); const v=$('#jrnl').value.trim(); if(!v){ p.journal=null; touch(p); return render(); }
+  const c=S.catalog.find(x=>normTxt(x.nome)===normTxt(v)); p.journal = c ? {name:c.nome, issn:c.issn, pagina:c.pagina, normas:c.normas, escopo:c.escopo, qualis:c.qualis} : {name:v}; touch(p); render(); };
+
+function renderItem(p, key){
+  const def=ITEMS[key], it=p.items[key], b=S.busy['an_'+key];
+  const sel = S.selAnalysis?.[key]; const A = it.analyses.find(a=>a.id===sel) || it.analyses[it.analyses.length-1];
+  const text=itemText(p,key); const stale = A && A.textHash!==hashStr(text);
+  const fields=def.fields.map(f=>`<div class="col" style="margin:8px 0"><label for="it_${key}_${f.id}">${esc(f.label)}</label><textarea id="it_${key}_${f.id}" rows="${f.rows}" placeholder="${esc(f.ph||'')}" data-bind="items.${key}.fields.${f.id}">${esc(it.fields[f.id]||'')}</textarea></div>`).join('');
+  return `<div class="card"><div class="row"><h2 style="margin:0;flex:1">${esc(def.name)} — ${esc(p.title)}</h2><button class="b sec" data-act="renameProject">Renomear</button><button class="b sec" data-act="exportReport">Relatório</button></div>
+    ${key==='pergunta'?journalPicker(p):''}
+    ${fields}
+    ${renderQueries(p, key)}
+    <div class="row" style="margin-top:8px">${b?`<span class="pill warn">${esc(b.msg||'')}</span>${b.total?`<div class="progress" style="flex:1;min-width:120px"><div style="width:${(100*(b.done||0)/b.total).toFixed(0)}%"></div></div>`:''}<button class="b sec" data-act="stopAnalysis" data-k="${key}">Parar</button>`:
+      `<button class="b" data-act="analyze" data-k="${key}" ${LLM.provider==='ollama'?'':'disabled'}>2. Analisar</button><span class="small muted">Lê os ${S.config.k} artigos mais próximos (≈ ${Math.round(S.config.k*4.5/60)+3} min no seu PC). ${LLM.provider==='ollama'?'':'A análise roda no PC com o Ollama.'}</span>`}</div></div>
+  ${A?renderAnalysis(p, key, A, stale):''}
+  ${it.analyses.length>1?`<div class="card"><h2>Versões analisadas</h2><table class="small"><tr><th>Data</th><th>Novidade</th>${def.criteria.map(c=>`<th>${esc(c.t)}</th>`).join('')}<th></th></tr>${[...it.analyses].reverse().map(a=>`<tr><td>${fmtDate(a.at)}</td><td>${a.novelty??'—'}</td>${def.criteria.map(c=>{const x=a.criteria.find(y=>y.id===c.id); return `<td>${x?`<span class="pill ${STATUS[x.status][0]}">${STATUS[x.status][1]}</span>`:'—'}</td>`;}).join('')}<td><button class="b sec" data-act="selA" data-k="${key}" data-a="${a.id}">${a.id===A.id?'aberta':'abrir'}</button></td></tr>`).join('')}</table></div>`:''}`;
+}
+ACTIONS.selA = el => { (S.selAnalysis ||= {})[el.dataset.k]=el.dataset.a; render(); };
+function renderAnalysis(p, key, A, stale){
+  const def=ITEMS[key];
+  const card=c=>{ const [cls,lab]=STATUS[c.status]; const refs=(c.ids||[]).map(id=>refLink(recById(p,id))).filter(Boolean);
+    return `<div class="crit"><div class="row"><b>${esc(c.t)}</b><span class="pill ${cls}">${lab}</span><span class="pill">${SRC_LABEL[c.src]}</span>${c.id==='novidade'&&A.novelty!=null?`<span class="small">índice ${A.novelty}</span>`:''}</div>
+      <div class="small" style="margin-top:4px">${esc(c.justificativa||'')}</div>
+      ${c.sugestao?`<div class="small" style="margin-top:4px"><b>Onde melhorar:</b> ${esc(c.sugestao)}</div>`:''}
+      ${c.trecho?`<div class="quote small">“${esc(c.trecho)}” ${c.trechoOK?'':'<span class="pill bad">trecho não encontrado no item</span>'}</div>`:''}
+      ${refs.length?`<div class="small muted">Evidência: ${refs.join('; ')}</div>`:''}
+      ${c.venueRefs?.length?`<div class="small muted">Na revista (${c.venueN} com termos próximos): ${c.venueRefs.map(r=>r.doi?`<a href="https://doi.org/${esc(r.doi)}" target="_blank" rel="noopener">${esc(r.title)}</a>`:esc(r.title)).join('; ')}</div>`:''}</div>`; };
+  const pill=cl=>cl==='ja_responde'?'<span class="pill bad">já responde</span>':cl==='em_parte'?'<span class="pill warn">em parte</span>':'<span class="pill">não responde</span>';
+  const filt=S.topFilter||'relevantes';
+  const list=A.top.filter(t=>filt==='todos'||t.classe!=='nao_responde');
+  return `<div class="card"><h2>Análise de ${fmtDate(A.at)}</h2>${stale?'<p><span class="pill warn">O texto mudou depois desta análise. Clique em Analisar para avaliar a versão atual.</span></p>':''}
+    ${A.warnings.map(w=>`<div class="small"><span class="pill warn">atenção</span> ${esc(w)}</div>`).join('')}
+    <div style="margin:8px 0"><span class="kpi"><b>${A.novelty??'—'}</b><span class="small muted">índice de novidade (0–100)</span></span><span class="kpi"><b>${A.top.length}</b><span class="small muted">artigos lidos</span></span><span class="kpi"><b>${A.corpusN}</b><span class="small muted">no corpus com resumo</span></span><span class="kpi"><b>${A.totals.reduce((s,x)=>s+(x.total||0),0)}</b><span class="small muted">resultados das buscas</span></span></div>
+    <table class="small" style="max-width:520px"><tr><th>Entre os mais próximos</th><th>Já respondem</th><th>Em parte</th><th>Índice</th></tr>${A.sat.map(s=>`<tr><td>${s.n}</td><td>${s.ja}</td><td>${s.pa}</td><td>${s.idx}</td></tr>`).join('')}</table>
+    <p class="small muted">Novidade: atende com índice ≥ 70 e nenhum artigo que já responde; parcial se houver 1 ou 2 que já respondem ou índice entre 40 e 69; não atende com 3 ou mais, ou índice abaixo de 40. Índice = 100 × (1 − (já respondem + ½ em parte) ÷ artigos lidos). Mede a sobreposição com os artigos mais próximos que as buscas encontraram; depende das consultas e da cobertura da base. ${A.saturou?'Saturação: nenhum artigo que já responde no último terço da lista.':''}</p></div>
+  <div class="card"><h2>Critérios</h2>${A.criteria.map(card).join('')}</div>
+  ${A.summary.length?`<div class="card"><h2>O que a literatura diz</h2>${A.summary.map(f=>`<p class="small">${esc(f.texto)} <span class="muted">[${f.ids.map(id=>refLink(recById(p,id))).join('; ')}]</span></p>`).join('')}</div>`:''}
+  <div class="card"><h2>Artigos lidos</h2><div class="tabs"><button class="${filt==='relevantes'?'on':''}" data-act="topF" data-f="relevantes">já respondem e em parte</button><button class="${filt==='todos'?'on':''}" data-act="topF" data-f="todos">todos (${A.top.length})</button></div>
+    ${list.map((t,i)=>{ const r=recById(p,t.id); if(!r) return ''; const c=r.cls?.[key+'|'+A.textHash]; return recLine(r, `<div class="small">${pill(t.classe)} <span class="muted">proximidade ${t.s}</span> ${c?.trecho?`<span class="quote">“${esc(c.trecho)}”</span>`:''}</div>`); }).join('')||'<p class="muted small">Nenhum artigo nesta categoria.</p>'}</div>`;
+}
+ACTIONS.topF = el => { S.topFilter=el.dataset.f; render(); };
+
+/* ---- extras.js ---- */
+/* ================= Programa de pesquisa, configurações, relatório, Gist e catálogo ================= */
+
+/* ---------- Programa: índice de corroboração ---------- */
+async function savePrograms(){ S.programs.forEach(p=>p.updatedAt ||= nowISO()); await DB.put('kv', S.programs, 'programs'); Sync.schedule(); }
+function touchProgram(pr){ pr.updatedAt=nowISO(); savePrograms(); }
+function corroboration(pr){
+  const st=pr.studies||[]; const concl=st.filter(s=>s.resultado==='corroborada'||s.resultado==='refutada');
+  const w=s=>Number(s.severidade)||1; const sw=concl.reduce((a,s)=>a+w(s),0);
+  const idx = sw ? Math.round(100*concl.filter(s=>s.resultado==='corroborada').reduce((a,s)=>a+w(s),0)/sw) : null;
+  const ctx=new Set(concl.map(s=>normTxt(s.contexto||'')).filter(Boolean));
+  return {idx, n:st.length, concl:concl.length, inconc:st.filter(s=>s.resultado==='inconclusiva').length, refut:concl.filter(s=>s.resultado==='refutada').length, ctx:ctx.size};
+}
+function renderProgram(){
+  const pr = S.programs.find(x=>x.id===S.progId) || S.programs[0];
+  const head = `<div class="card"><div class="row"><h2 style="margin:0;flex:1">Programa de pesquisa</h2>
+    <select id="progSel" data-chg="progSel" style="width:auto">${S.programs.map(x=>`<option value="${x.id}" ${pr&&x.id===pr.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
+    <button class="b sec" data-act="newProgram">+ Programa</button></div>
+    <p class="small muted">Registre o resultado de cada estudo do programa. O índice mostra quanto as hipóteses do programa resistiram aos testes conclusivos, ponderado pela severidade do teste. Não é uma medida de aceitação pela comunidade, que depende de replicação por terceiros.</p></div>`;
+  if (!pr) return head;
+  const c=corroboration(pr); const res=['corroborada','refutada','inconclusiva'];
+  return head + `<div class="card"><input type="text" id="prName" data-bindp="name" data-pid="${pr.id}" value="${esc(pr.name)}" style="font-weight:600;font-size:16px">
+    <textarea id="prDesc" rows="2" data-bindp="desc" data-pid="${pr.id}" placeholder="Núcleo do programa: a ideia central que os estudos testam" style="margin-top:6px">${esc(pr.desc||'')}</textarea>
+    <div style="margin:10px 0"><span class="kpi"><b>${c.idx??'—'}</b><span class="small muted">índice de corroboração (0–100)</span></span><span class="kpi"><b>${c.concl}</b><span class="small muted">testes conclusivos</span></span><span class="kpi"><b>${c.refut}</b><span class="small muted">refutações</span></span><span class="kpi"><b>${c.inconc}</b><span class="small muted">inconclusivos</span></span><span class="kpi"><b>${c.ctx}</b><span class="small muted">contextos distintos</span></span></div>
+    ${c.concl<3?'<p class="small"><span class="pill warn">poucos testes</span> Com menos de 3 testes conclusivos o índice é instável.</p>':''}
+    ${c.concl>=3&&c.ctx<2?'<p class="small"><span class="pill warn">um só contexto</span> Todos os testes vêm do mesmo contexto: a generalização ainda não foi testada.</p>':''}
+    <p class="small muted">Índice = 100 × Σ severidade dos testes corroborados ÷ Σ severidade dos testes conclusivos. Severidade: 1 = previsão pouco arriscada; 3 = previsão arriscada, que tinha boa chance de falhar.</p>
+    <div style="overflow-x:auto"><table class="small"><tr><th>Estudo</th><th>Hipótese testada</th><th>Resultado</th><th>Severidade</th><th>Contexto (região, sensor, escala)</th><th>Notas</th><th></th></tr>
+    ${(pr.studies||[]).map((s,i)=>`<tr><td><input type="text" id="ps_t_${i}" data-bindp="studies.${i}.titulo" data-pid="${pr.id}" value="${esc(s.titulo||'')}"></td>
+      <td><textarea id="ps_h_${i}" rows="2" data-bindp="studies.${i}.hipotese" data-pid="${pr.id}">${esc(s.hipotese||'')}</textarea></td>
+      <td><select data-bindpc="studies.${i}.resultado" data-pid="${pr.id}">${res.map(r=>`<option ${s.resultado===r?'selected':''}>${r}</option>`).join('')}</select></td>
+      <td><select data-bindpc="studies.${i}.severidade" data-pid="${pr.id}">${[1,2,3].map(n=>`<option ${Number(s.severidade)===n?'selected':''}>${n}</option>`).join('')}</select></td>
+      <td><input type="text" id="ps_c_${i}" data-bindp="studies.${i}.contexto" data-pid="${pr.id}" value="${esc(s.contexto||'')}"></td>
+      <td><input type="text" id="ps_n_${i}" data-bindp="studies.${i}.notas" data-pid="${pr.id}" value="${esc(s.notas||'')}"></td>
+      <td><button class="b sec" data-act="delStudy" data-i="${i}">×</button></td></tr>`).join('')}</table></div>
+    <div class="row" style="margin-top:8px"><button class="b" data-act="addStudy">+ Estudo</button>${cur()?`<button class="b sec" data-act="addStudyFromProject">+ Hipótese do projeto atual</button>`:''}</div></div>`;
+}
+ACTIONS.progSel = el => { S.progId=el.value; render(); };
+ACTIONS.newProgram = () => { const n=prompt('Nome do programa (ex.: A — Permanência da vegetação para MRV):'); if(!n) return; const pr={id:uid('g'), name:n.trim(), desc:'', studies:[], updatedAt:nowISO()}; S.programs.push(pr); S.progId=pr.id; savePrograms(); render(); };
+const curProgram = () => S.programs.find(x=>x.id===S.progId) || S.programs[0];
+ACTIONS.addStudy = () => { const pr=curProgram(); pr.studies.push({id:uid('t'), titulo:'', hipotese:'', resultado:'inconclusiva', severidade:2, contexto:'', notas:'', at:nowISO()}); touchProgram(pr); render(); };
+ACTIONS.addStudyFromProject = () => { const pr=curProgram(), p=cur(); pr.studies.push({id:uid('t'), titulo:p.title, hipotese:p.items.hipotese.fields.texto||'', resultado:'inconclusiva', severidade:2, contexto:'', notas:'', projectId:p.id, at:nowISO()}); touchProgram(pr); render(); };
+ACTIONS.delStudy = el => { const pr=curProgram(); if(!confirm('Remover este estudo?')) return; pr.studies.splice(Number(el.dataset.i),1); touchProgram(pr); render(); };
+document.addEventListener('input', ev => { if (ev.target.dataset.bindp?.startsWith('studies')) debounceRender(); });
 
 /* ---------- Configurações ---------- */
 function renderConfig(){
   const c=S.config; const inp=(k,label,type='text',ph='')=>`<div class="col" style="margin:6px 0"><label>${label}</label><input type="${type}" data-cfg="${k}" value="${esc(c[k]??'')}" placeholder="${esc(ph)}"></div>`;
-  return `<div class="card"><h2>IA local (Ollama)</h2>
-    ${inp('ollamaBase','Endereço do Ollama','url')}${inp('ollamaModel','Modelo do crítico','text','qwen3:14b')}${inp('embedModel','Modelo de embeddings','text','qwen3-embedding:0.6b')}
-    <div class="row"><button class="b sec" data-act="testLLM">Testar conexão</button><span class="small muted">No PC, o Ollama precisa liberar a origem deste site em OLLAMA_ORIGINS (veja o LEIAME).</span></div></div>
-  <div class="card"><h2>Reserva no celular (OpenRouter)</h2>
-    <label style="font-weight:400"><input type="checkbox" data-cfg="allowOpenRouter" ${c.allowOpenRouter?'checked':''}> Permitir OpenRouter quando o Ollama não estiver acessível</label>
-    <p class="small"><span class="pill warn">Privacidade</span> As ideias passam por terceiros. Na conta do OpenRouter, bloqueie provedores que treinam com prompts. Limite gratuito: 50 pedidos por dia.</p>
-    ${inp('openrouterKey','Chave do OpenRouter (fica só neste aparelho)','password')}${inp('openrouterModel','Modelo','text')}</div>
-  <div class="card"><h2>Bases bibliográficas</h2><p class="small muted">O Semantic Scholar e o Crossref funcionam sem chave. O OpenAlex é opcional.</p>${inp('email','E-mail para o Crossref (opcional, identifica as consultas)','text')}<details><summary class="small">OpenAlex (opcional)</summary>${inp('openalexKey','Chave gratuita do OpenAlex','password')}</details></div>
-  <div class="card"><h2>Sincronização (Google Drive)</h2><p class="small muted">Os projetos ficam na pasta oculta do aplicativo no seu Drive. As chaves de API não são sincronizadas. Em conflito, vence a versão mais recente de cada projeto.</p>
-    ${inp('googleClientId','ID do cliente OAuth do Google (o mesmo tipo usado no LabResearch)','text')}<div class="row"><button class="b" data-act="driveConnect">Conectar e sincronizar</button><span class="small">${esc(Sync.status)}</span></div></div>
+  return `<div class="card"><h2>IA local (Ollama)</h2>${inp('ollamaBase','Endereço do Ollama','url')}${inp('ollamaModel','Modelo','text','qwen3:14b')}${inp('embedModel','Modelo de embeddings','text','qwen3-embedding:0.6b')}
+    <button class="b sec" data-act="testLLM">Testar conexão</button></div>
+  <div class="card"><h2>Análise</h2>${inp('k','Artigos lidos por análise (mais próximos do item)','number')}${inp('perQuery','Máximo de registros trazidos por consulta','number')}
+    <p class="small muted">Com 100 artigos a leitura leva cerca de 7–8 min no seu PC. Artigos já lidos para a mesma versão do item não são relidos.</p></div>
+  <div class="card"><h2>Sincronização (mesmo Gist do LabResearch)</h2><p class="small muted">O Descartes grava só no arquivo <code>descartes.json</code> do Gist; o arquivo do LabResearch não é alterado. O catálogo de revistas é lido do LabResearch.</p>
+    ${inp('gistId','ID do Gist','text')}${inp('githubToken','Token do GitHub (fica só neste aparelho)','password')}
+    <div class="row"><button class="b sec" data-act="detectLab">Usar a configuração do LabResearch deste navegador</button><button class="b" data-act="syncNow">Sincronizar agora</button><span class="small">${esc(Sync.status)}</span></div>
+    <p class="small">Catálogo de revistas: <b>${S.catalog.length}</b> revistas.</p></div>
   <div class="card"><h2>Backup</h2><div class="row"><button class="b sec" data-act="exportBackup">Exportar backup (JSON)</button><input type="file" id="bkFile" accept=".json"><button class="b sec" data-act="importBackup">Importar backup</button></div>
     ${cur()?`<div class="row" style="margin-top:10px"><button class="b danger" data-act="deleteProject">Excluir projeto atual</button></div>`:''}<p class="small muted">Descartes v${VERSION}</p></div>`;
 }
-ACTIONS.testLLM = async () => { const ok=await LLM.checkStatus(); if(!ok) return toast('Sem IA: verifique se o Ollama está rodando e se OLLAMA_ORIGINS inclui este site.', 7000);
-  try{ const out=await LLM.chat({system:'Responda em JSON.', user:'Responda {"ok": true}', schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok']}}); toast(out.ok?`Conexão OK (${LLM.provider}).`:'Resposta inesperada.'); }catch(e){ toast(e.message, 7000); } };
+ACTIONS.testLLM = async () => { const ok=await LLM.checkStatus(); if(!ok) return toast('Sem IA: verifique o Ollama e o OLLAMA_ORIGINS.', 7000);
+  try{ const out=await LLM.chat({system:'Responda em JSON.', user:'Responda {"ok": true}', schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok']}}); toast(out.ok?'Conexão OK.':'Resposta inesperada.'); }catch(e){ toast(e.message, 7000); } };
 
-/* ---------- Exportação ---------- */
+/* ---------- Relatório e backup ---------- */
 function download(name, text, type='application/json'){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
-ACTIONS.exportBackup = () => { const cfg={...S.config}; delete cfg.openrouterKey; delete cfg.openalexKey;
-  download(`descartes-backup-${new Date().toISOString().slice(0,10)}.json`, JSON.stringify({app:'descartes', version:VERSION, at:nowISO(), config:cfg, projects:S.projects})); };
+ACTIONS.exportBackup = () => { const cfg={...S.config}; delete cfg.githubToken; delete cfg.openrouterKey; delete cfg.openalexKey;
+  download(`descartes-backup-${new Date().toISOString().slice(0,10)}.json`, JSON.stringify({app:'descartes', version:VERSION, at:nowISO(), config:cfg, projects:S.projects, programs:S.programs})); };
 ACTIONS.importBackup = async () => { const f=$('#bkFile').files[0]; if(!f) return toast('Escolha o arquivo.'); const j=JSON.parse(await f.text()); if(j.app!=='descartes') return toast('Arquivo não é um backup do Descartes.');
-  let n=0; for (const rp of j.projects){ migrate(rp); const lp=S.projects.find(p=>p.id===rp.id); if(!lp){ S.projects.push(rp); n++; await DB.put('projects',rp); } else if (rp.updatedAt>lp.updatedAt){ Object.assign(lp, rp); n++; await DB.put('projects',lp); } }
+  let n=Sync.mergeProjects(j.projects||[]); Sync.mergePrograms(j.programs||[]); for (const p of S.projects) await DB.put('projects',p); await DB.put('kv',S.programs,'programs');
   if (!S.currentId && S.projects.length) S.currentId=S.projects[0].id; toast(`${n} projeto(s) importados ou atualizados.`); render(); };
-ACTIONS.exportDossier = () => {
-  const p=cur(); const w=window.open('','_blank'); if(!w) return toast('Permita pop-ups para gerar o dossiê.');
-  const L=p.lit; const vres=L.validation.sample.length?validationResults(p):null;
-  const sec=STAGES.map(st=>`<h2>${esc(st.name)} ${p.gates[st.id]?`<small>(portão em ${fmtDate(p.gates[st.id].at)}, ${p.gates[st.id].rounds} rodada(s))</small>`:'<small>(sem portão)</small>'}</h2><pre>${esc(stageText(p,st))}</pre>
-    ${st.criteria.length?`<table><tr><th>Critério</th><th>Sua nota</th><th>Crítico (última)</th></tr>${st.criteria.map(c=>{const lc=lastCritique(p,st.id); return `<tr><td>${esc(c.t)}${c.o?' *':''}</td><td>${p.stages[st.id].self[c.id]??'—'}</td><td>${lc?.result.avaliacoes.find(a=>a.criterio_id===c.id)?.nota??'—'}</td></tr>`;}).join('')}</table>`:''}`).join('');
-  const an=dagAnalysis(p.dag);
-  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Dossiê — ${esc(p.title)}</title><style>body{font:11pt/1.45 Georgia,serif;max-width:800px;margin:24px auto;padding:0 16px;color:#111}h1{font-size:20pt}h2{font-size:14pt;margin-top:22px;border-bottom:1px solid #ccc}small{color:#666;font-weight:normal}pre{white-space:pre-wrap;font:10.5pt/1.4 Georgia,serif;background:#f6f6f6;padding:8px}table{border-collapse:collapse;width:100%;font-size:10pt;margin:6px 0}td,th{border:1px solid #ccc;padding:3px 6px;text-align:left;vertical-align:top}</style></head><body>
-  <h1>Dossiê de concepção — ${esc(p.title)}</h1><p>Gerado pelo Descartes v${VERSION} em ${fmtDate(nowISO())}. * = critério obrigatório.</p>${sec}
-  <h2>DAG</h2><p>Exposição: ${esc(p.dag.exposure)}; desfecho: ${esc(p.dag.outcome)}; ajustados: ${esc((p.dag.adjust||[]).join(', '))}. Caminhos pela porta dos fundos abertos: ${an.paths.filter(x=>x.open).length} de ${an.paths.length}.</p>
-  <h2>Literatura</h2><p>${L.records.length} registros; ${included(p).length} incluídos. Critérios de triagem:</p><pre>${esc(L.criteria)}</pre>
-  <table><tr><th>Data</th><th>Fonte</th><th>Tipo</th><th>Consulta</th><th>n</th><th>novos</th></tr>${L.searches.map(s=>`<tr><td>${fmtDate(s.at)}</td><td>${esc(s.fonte)}</td><td>${esc(s.tipo)}</td><td>${esc(s.consulta)}</td><td>${s.n}</td><td>${s.novos}</td></tr>`).join('')}</table>
-  ${vres?`<h3>Validação da extração (limiar ${L.validation.threshold})</h3><table><tr><th>Campo</th><th>n</th><th>Concordância</th><th>Kappa</th><th>Situação</th></tr>${L.schema.map(f=>`<tr><td>${esc(f.nome)}</td><td>${vres[f.id].n}</td><td>${vres[f.id].agree==null?'—':(100*vres[f.id].agree).toFixed(0)+'%'}</td><td>${vres[f.id].kappa==null?'—':vres[f.id].kappa.toFixed(2)}</td><td>${vres[f.id].pass?'aprovado':'reprovado'}</td></tr>`).join('')}</table>`:''}
-  <h3>Lacuna</h3><p>${esc(L.gap.claim||'—')}</p><p>${gapDeclared(p)?`Declarada não refutada em ${fmtDate(L.gap.declaredAt)}. Justificativa: ${esc(L.gap.justification)}`:'Não declarada.'}</p>
-  <h2>Diário de decisões</h2><table><tr><th>Data</th><th>Estágio</th><th>Tipo</th><th>Conteúdo</th><th>Decisão</th><th>Justificativa</th></tr>${p.diary.map(d=>`<tr><td>${fmtDate(d.at)}</td><td>${esc(d.stageName||'')}</td><td>${esc(d.kind)}</td><td>${esc(d.text||'')}</td><td>${esc(d.decision||'')}</td><td>${esc(d.justification||'')}</td></tr>`).join('')}</table>
-  <script>setTimeout(()=>print(),400)<\/script></body></html>`);
-  w.document.close();
+ACTIONS.exportReport = () => {
+  const p=cur(); const w=window.open('','_blank'); if(!w) return toast('Permita pop-ups para gerar o relatório.');
+  const sec=Object.entries(ITEMS).map(([k,def])=>{ const A=p.items[k].analyses.at(-1); const t=itemText(p,k);
+    return `<h2>${esc(def.name)}</h2><pre>${esc(t||'—')}</pre>${A?`<p>Análise de ${fmtDate(A.at)} · índice de novidade <b>${A.novelty}</b> · ${A.top.length} artigos lidos de ${A.corpusN} no corpus.</p>
+      <table><tr><th>Critério</th><th>Fonte</th><th>Situação</th><th>Justificativa</th><th>Onde melhorar</th></tr>${A.criteria.map(c=>`<tr><td>${esc(c.t)}</td><td>${SRC_LABEL[c.src]}</td><td>${STATUS[c.status][1]}</td><td>${esc(c.justificativa||'')}</td><td>${esc(c.sugestao||'')}</td></tr>`).join('')}</table>
+      ${A.summary.length?`<h3>O que a literatura diz</h3>${A.summary.map(f=>`<p>${esc(f.texto)} [${f.ids.map(id=>{const r=recById(p,id); return r?esc(refShort(r)):'';}).join('; ')}]</p>`).join('')}`:''}`:'<p>Sem análise.</p>'}`; }).join('');
+  const refs=new Set(); Object.keys(ITEMS).forEach(k=>{ const A=p.items[k].analyses.at(-1); if(A){ A.summary.forEach(f=>f.ids.forEach(i=>refs.add(i))); A.criteria.forEach(c=>(c.ids||[]).forEach(i=>refs.add(i))); } });
+  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Descartes — ${esc(p.title)}</title><style>body{font:11pt/1.45 Georgia,serif;max-width:820px;margin:24px auto;padding:0 16px;color:#111}h1{font-size:19pt}h2{font-size:14pt;margin-top:22px;border-bottom:1px solid #ccc}pre{white-space:pre-wrap;font:inherit;background:#f6f6f6;padding:8px}table{border-collapse:collapse;width:100%;font-size:9.5pt;margin:6px 0}td,th{border:1px solid #ccc;padding:3px 6px;text-align:left;vertical-align:top}li{font-size:9.5pt}</style></head><body>
+  <h1>${esc(p.title)}</h1><p>Relatório do Descartes v${VERSION}, ${fmtDate(nowISO())}${p.journal?.name?` · revista-alvo: ${esc(p.journal.name)}`:''}.</p>${sec}
+  <h2>Referências citadas</h2><ul>${[...refs].map(id=>recById(p,id)).filter(Boolean).map(r=>`<li>${esc(r.authors||'')} (${r.year||'s.d.'}). ${esc(r.title)}. ${esc(r.venue||'')}${r.doi?` https://doi.org/${esc(r.doi)}`:''}</li>`).join('')}</ul>
+  <script>setTimeout(()=>print(),400)<\/script></body></html>`); w.document.close();
 };
 
-/* ---------- Google Drive (pasta do aplicativo) ---------- */
+/* ---------- Catálogo de revistas do LabResearch ---------- */
+const pick = (o, keys) => { for (const k of Object.keys(o)) if (keys.includes(k.toLowerCase())) { const v=o[k]; if (typeof v==='string' && v.trim()) return v.trim(); } return ''; };
+function findJournals(obj, out=[], depth=0){
+  if (!obj || depth>6) return out;
+  if (Array.isArray(obj)){
+    const objs=obj.filter(x=>x && typeof x==='object' && !Array.isArray(x));
+    const looks=objs.filter(x=>Object.keys(x).some(k=>/issn/i.test(k)) && pick(x,['nome','name','titulo','title','periodico','journal']));
+    if (looks.length>=3 && looks.length>=objs.length*0.5){ for (const x of looks) out.push({nome:pick(x,['nome','name','titulo','title','periodico','journal']), issn:pick(x,['issn','eissn','issn_e','issnl','issn_l']),
+        pagina:pick(x,['pagina','url','homepage','site','link','page']), normas:pick(x,['normas','guia','instrucoes','authorguide','guide','guidelines','normasurl']), escopo:pick(x,['escopo','scope','aims','aimsscope','escopourl']), qualis:pick(x,['qualis'])}); return out; }
+    for (const x of obj) findJournals(x, out, depth+1); return out;
+  }
+  if (typeof obj==='object') for (const v of Object.values(obj)) findJournals(v, out, depth+1);
+  return out;
+}
+async function setCatalog(list){ const m=new Map(); for (const j of list) if (j.nome && !m.has(normTxt(j.nome))) m.set(normTxt(j.nome), j); if (!m.size) return false;
+  S.catalog=[...m.values()].sort((a,b)=>a.nome.localeCompare(b.nome)); await DB.put('kv', S.catalog, 'catalog'); return true; }
+function scanLocalStorage(){
+  const found={token:'', gist:'', journals:[]}; let ls; try{ ls=window.localStorage; }catch(e){ return found; }
+  const tokRe=/(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})/; const gistRe=/^[0-9a-f]{20,40}$/i;
+  const walk=(o,keyName='')=>{ if (typeof o==='string'){ const t=o.match(tokRe); if(t&&!found.token) found.token=t[1]; if(/gist/i.test(keyName) && gistRe.test(o.trim()) && !found.gist) found.gist=o.trim(); return; }
+    if (o && typeof o==='object') for (const [k,v] of Object.entries(o)) walk(v,k); };
+  for (let i=0;i<ls.length;i++){ const k=ls.key(i); if (/^descartes/i.test(k)) continue; const v=ls.getItem(k); let j=null; try{ j=JSON.parse(v); }catch(e){}
+    if (j!==null && typeof j==='object'){ walk(j,k); findJournals(j, found.journals); } else walk(v,k); }
+  return found;
+}
+ACTIONS.detectLab = async () => { const f=scanLocalStorage();
+  if (f.token) S.config.githubToken=f.token; if (f.gist) S.config.gistId=f.gist; await saveConfig();
+  const cat = f.journals.length ? await setCatalog(f.journals) : false;
+  toast(`LabResearch neste navegador: ${f.token?'token encontrado':'token não encontrado'}, ${f.gist?'Gist encontrado':'Gist não encontrado'}, ${cat?S.catalog.length+' revistas':'catálogo não encontrado'}.`, 8000);
+  render(); if (S.config.gistId && S.config.githubToken) Sync.sync(); };
+
+/* ---------- Sincronização pelo Gist ---------- */
 const Sync = {
-  token:null, exp:0, fileId:null, status:'não conectado', timer:null, running:false,
-  init(){ if (S.config.googleClientId) this.loadGIS().catch(()=>{}); this.setStatus(S.config.googleClientId && localStorage.getItem('descartesDrive')==='1' ? 'Drive: toque para sincronizar' : 'local'); },
-  setStatus(s){ this.status=s; const el=$('#syncStatus'); if(el){ el.textContent=s; el.dataset.act='driveConnect'; el.style.cursor='pointer'; } },
-  loadGIS(){ return new Promise((res,rej)=>{ if (window.google?.accounts?.oauth2) return res(); const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client'; s.onload=res; s.onerror=()=>rej(new Error('Falha ao carregar o login do Google')); document.head.appendChild(s); }); },
-  async getToken(){ if (this.token && Date.now()<this.exp-60000) return this.token; if (!S.config.googleClientId) throw new Error('Informe o ID do cliente OAuth nas Configurações.');
-    await this.loadGIS(); return new Promise((res,rej)=>{ const tc=google.accounts.oauth2.initTokenClient({client_id:S.config.googleClientId, scope:'https://www.googleapis.com/auth/drive.appdata',
-      callback:r=>{ if(r.error) return rej(new Error(r.error)); this.token=r.access_token; this.exp=Date.now()+r.expires_in*1000; localStorage.setItem('descartesDrive','1'); res(this.token); }}); tc.requestAccessToken({prompt:this.token?'':undefined}); }); },
-  async api(url, opt={}){ const t=await this.getToken(); const r=await fetch(url,{...opt, headers:{...(opt.headers||{}), Authorization:'Bearer '+t}}); if(!r.ok) throw new Error('Drive HTTP '+r.status); return r; },
-  async findFile(){ const r=await this.api(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${encodeURIComponent("name='descartes.json'")}&fields=files(id,modifiedTime)`); const j=await r.json(); this.fileId=j.files?.[0]?.id||null; return this.fileId; },
+  status:'local', timer:null, running:false,
+  ok(){ return !!(S.config.gistId && S.config.githubToken); },
+  setStatus(s){ this.status=s; const el=$('#syncStatus'); if(el){ el.textContent=s; el.dataset.act='syncNow'; el.style.cursor='pointer'; } },
+  init(){ if (!this.ok()){ const f=scanLocalStorage(); if (f.token && f.gist){ S.config.githubToken=f.token; S.config.gistId=f.gist; saveConfig(); toast('Configuração do LabResearch encontrada neste navegador: usando o mesmo Gist.', 6000); } else if (f.journals.length && !S.catalog.length) setCatalog(f.journals); }
+    if (this.ok()) this.sync(); else this.setStatus('local'); },
+  async gh(method, body){ const r=await fetch(`https://api.github.com/gists/${S.config.gistId.trim()}`,{method, headers:{Authorization:'Bearer '+S.config.githubToken.trim(), Accept:'application/vnd.github+json', ...(body?{'Content-Type':'application/json'}:{})}, body:body?JSON.stringify(body):undefined});
+    if (!r.ok) throw new Error('GitHub HTTP '+r.status); return r.json(); },
+  async fileContent(f){ if (!f) return null; if (f.truncated){ const r=await fetch(f.raw_url); return r.ok? r.text() : null; } return f.content; },
+  mergeProjects(list){ let n=0; for (const rp of list){ migrate(rp); const lp=S.projects.find(p=>p.id===rp.id); if(!lp){ S.projects.push(rp); n++; } else if ((rp.updatedAt||'')>(lp.updatedAt||'')){ Object.assign(lp,rp); n++; } } return n; },
+  mergePrograms(list){ for (const rp of list){ const lp=S.programs.find(p=>p.id===rp.id); if(!lp) S.programs.push(rp); else if ((rp.updatedAt||'')>(lp.updatedAt||'')) Object.assign(lp,rp); } },
   async sync(){
-    if (this.running) return; this.running=true; this.setStatus('Drive: sincronizando…');
+    if (this.running || !this.ok()) return; this.running=true; this.setStatus('Gist: sincronizando…');
     try{
-      const deleted=(await DB.get('kv','deleted'))||{};
-      if (await this.findFile()){ const r=await this.api(`https://www.googleapis.com/drive/v3/files/${this.fileId}?alt=media`); const remote=await r.json();
-        Object.assign(deleted, remote.deleted||{});
-        for (const rp of remote.projects||[]){ if (deleted[rp.id]) continue; migrate(rp); const lp=S.projects.find(p=>p.id===rp.id);
-          if (!lp){ S.projects.push(rp); await DB.put('projects',rp); } else if (rp.updatedAt>lp.updatedAt){ Object.assign(lp,rp); await DB.put('projects',lp); } } }
-      for (const id of Object.keys(deleted)){ if (S.projects.find(p=>p.id===id)){ S.projects=S.projects.filter(p=>p.id!==id); await DB.del('projects',id); } }
-      await DB.put('kv',deleted,'deleted');
-      const body=JSON.stringify({app:'descartes', version:VERSION, at:nowISO(), projects:S.projects, deleted});
-      if (this.fileId) await this.api(`https://www.googleapis.com/upload/drive/v3/files/${this.fileId}?uploadType=media`,{method:'PATCH', headers:{'Content-Type':'application/json'}, body});
-      else { const fd=new FormData(); fd.append('metadata', new Blob([JSON.stringify({name:'descartes.json', parents:['appDataFolder']})],{type:'application/json'})); fd.append('file', new Blob([body],{type:'application/json'}));
-        await this.api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST', body:fd}); }
+      const g=await this.gh('GET'); const deleted=(await DB.get('kv','deleted'))||{};
+      const mine=await this.fileContent(g.files?.['descartes.json']);
+      if (mine){ const remote=JSON.parse(mine); Object.assign(deleted, remote.deleted||{});
+        this.mergeProjects((remote.projects||[]).filter(p=>!deleted[p.id])); this.mergePrograms(remote.programs||[]); }
+      for (const id of Object.keys(deleted)) if (S.projects.find(p=>p.id===id)){ S.projects=S.projects.filter(p=>p.id!==id); await DB.del('projects',id); }
+      for (const p of S.projects) await DB.put('projects',p); await DB.put('kv',S.programs,'programs'); await DB.put('kv',deleted,'deleted');
+      // catálogo: arquivos do LabResearch no mesmo Gist
+      const js=[]; for (const [name,f] of Object.entries(g.files||{})){ if (name==='descartes.json' || !/\.json$/i.test(name)) continue; try{ findJournals(JSON.parse(await this.fileContent(f)), js); }catch(e){} }
+      if (js.length) await setCatalog(js);
+      await this.gh('PATCH', {files:{'descartes.json':{content:JSON.stringify({app:'descartes', version:VERSION, at:nowISO(), projects:S.projects, programs:S.programs, deleted})}}});
       if (!S.projects.find(p=>p.id===S.currentId)) S.currentId=S.projects[0]?.id||null;
-      this.setStatus('Drive: '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})); render();
-      if (LLM.online) Queue.process();
-    }catch(e){ this.setStatus('Drive: erro'); toast('Sincronização: '+e.message, 6000); }
+      this.setStatus('Gist: '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})); render();
+    }catch(e){ this.setStatus('Gist: erro'); toast('Sincronização: '+e.message, 6000); }
     this.running=false;
   },
-  schedule(){ if (!this.token) return; clearTimeout(this.timer); this.timer=setTimeout(()=>this.sync(), 8000); },
+  schedule(){ if (!this.ok()) return; clearTimeout(this.timer); this.timer=setTimeout(()=>this.sync(), 10000); },
   async markDeleted(id){ const d=(await DB.get('kv','deleted'))||{}; d[id]=nowISO(); await DB.put('kv',d,'deleted'); this.schedule(); },
 };
-ACTIONS.driveConnect = () => Sync.sync();
+ACTIONS.syncNow = () => Sync.ok() ? Sync.sync() : (S.view='config', render(), toast('Configure o Gist primeiro.'));
 boot();
 </script>
 </body>

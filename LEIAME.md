@@ -1,92 +1,57 @@
-# Descartes v0.1 — instalação e primeiro teste
+# Descartes v0.2 — guia rápido
 
-Aplicativo de uso pessoal para conceber pesquisas do esboço à teoria. Funciona no PC e no celular, offline, sem servidor. A IA (Qwen) roda no seu PC e é opcional: rubricas, matriz, DAG, diário e buscas funcionam sem ela.
+Você escreve a pergunta, a hipótese ou o contrafactual. O Descartes confronta cada item com a literatura e devolve, critério por critério, se atende, o porquê, onde melhorar e os artigos que sustentam a avaliação.
 
-## 1. Publicar no GitHub Pages (5 min)
+## Atualizar (você já tem a v0.1 publicada)
 
-1. Crie um repositório público chamado `descartes` na sua conta (`hgribeirogeo`).
-2. Envie para a raiz do repositório: `index.html`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
-3. Em *Settings → Pages*, escolha a branch `main` e a pasta `/ (root)`.
-4. O endereço será `https://hgribeirogeo.github.io/descartes/`.
+1. Substitua no repositório `descartes`: `index.html` e `sw.js`. Os outros arquivos não mudaram.
+2. Abra `https://hgribeirogeo.github.io/descartes/` e recarregue com Ctrl+F5.
+3. Seus projetos da v0.1 continuam lá. A pergunta escrita no estágio 2 vira a pergunta do projeto. Os textos antigos ficam guardados, mesmo sem aparecer na tela.
 
-A pasta `testes/` não precisa ir para o repositório. Ela serve para repetir os testes automatizados.
+## Ligação com o LabResearch
 
-## 2. Preparar o Qwen (Ollama no WSL)
+- Abrindo o Descartes no mesmo navegador em que você usa o LabResearch, ele procura o ID do Gist e o token do LabResearch e passa a usar o mesmo Gist. Se não encontrar, preencha os dois em **Configurações → Sincronização**.
+- O Descartes grava somente o arquivo `descartes.json` dentro do Gist. O arquivo do LabResearch não é alterado.
+- O catálogo de revistas (nome, ISSN, links e Qualis) é lido do LabResearch. Na tela Pergunta, escolha a revista-alvo.
 
-1. No terminal do WSL, libere o site e reduza o uso de memória de vídeo:
-   ```
-   sudo systemctl edit ollama.service
-   ```
-   Cole, salve e saia:
-   ```
-   [Service]
-   Environment="OLLAMA_ORIGINS=https://hgribeirogeo.github.io"
-   Environment="OLLAMA_FLASH_ATTENTION=1"
-   Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
-   ```
-   Depois: `sudo systemctl daemon-reload && sudo systemctl restart ollama`
-2. Baixe os modelos:
-   ```
-   ollama pull qwen3:14b
-   ollama pull qwen3-embedding:0.6b
-   ```
-3. Confira: `ollama run qwen3:14b --verbose "Responda apenas: ok"` duas vezes e depois `ollama ps`. A coluna PROCESSOR deve mostrar `100% GPU`.
-4. Abra o Descartes no Chrome ou no Edge. Na primeira chamada, o navegador pede permissão para acessar a rede local. Aceite: é o Ollama no seu próprio PC.
-5. Em **Configurações → Testar conexão**, o selo no topo deve mostrar "IA: Qwen local".
+## Como uma análise funciona
 
-## 3. Bases bibliográficas (nada a configurar)
+1. **Consultas, antes de analisar:**
+   - **Sugerir consultas** (cerca de 10 s): o Qwen lê o seu texto e propõe 2 ou 3 consultas em inglês, cada uma com o ângulo do item que cobre.
+   - **Testar consultas** (sem IA): mostra quantos artigos cada consulta traz e os 5 mais citados, com aviso se estiver ampla demais (mais de 5.000) ou restrita demais (menos de 20).
+   - Edite até ficarem precisas e só então clique em **Analisar**. Se você não sugerir nem escrever nenhuma consulta, o Qwen gera as consultas durante a análise.
+2. **Busca:** o Semantic Scholar traz até 300 registros por consulta, que se somam ao corpus do projeto (aba Literatura).
+3. **Ordenação:** embeddings calculados no seu PC ordenam o corpus pela proximidade com o item.
+4. **Leitura:** o Qwen lê os **100 mais próximos** e classifica cada um como "já responde", "em parte" ou "não responde", com o trecho do resumo que justifica.
+5. **Índice de novidade:** 100 × (1 − (já respondem + ½ em parte) ÷ lidos). A tabela de saturação mostra o índice entre os 15, 50 e 100 primeiros. Se ainda aparecerem artigos que já respondem no último terço da lista, o Descartes avisa que vale ler mais.
+6. **Cartões por critério**, um critério por chamada. O selo diz de onde vem a avaliação:
+   - *literatura*: os artigos mais próximos;
+   - *texto*: o próprio item;
+   - *coerência*: a ligação com o item anterior;
+   - *revista*: os artigos da revista-alvo nos últimos 5 anos.
+7. **Resumo da literatura:** cada frase aponta os artigos que a sustentam.
 
-- **Semantic Scholar (principal, sem chave):** busca reproduzível no título e no resumo, com "frase exata", `+` (e), `|` (ou), `-` (excluir) e parênteses. Também fornece a rede de citações do núcleo e a cadeia de referências e citantes. O limite de uso é compartilhado entre todos os usuários sem chave; em horários de pico o app espera e tenta de novo.
-- **Scopus e Web of Science:** busque pelo Periódicos CAPES, exporte em CSV (Scopus) ou em texto delimitado por tabulação (Web of Science) e importe em Literatura → Fontes.
-- **Consensus:** exporte em CSV e importe. Entra como busca exploratória, e a coluna Takeaway (gerada por IA) é descartada.
-- **Crossref:** confere os DOIs sugeridos pelo crítico, sem chave.
-- **OpenAlex (opcional):** fica escondido em Configurações. Só use se o Semantic Scholar falhar no seu navegador.
+**Tempo:** cerca de 10 a 12 minutos por análise no seu PC, com 100 artigos. Reanalisar a mesma versão do item não relê os artigos já lidos. O número de artigos lidos é ajustável em Configurações.
 
-**Primeira coisa a testar:** faça uma busca no Semantic Scholar pelo app publicado. Este ambiente de testes não alcança a API real, então ainda não confirmei que ela aceita chamadas vindas do navegador. Se aparecer erro de rede, me avise: a alternativa é a chave gratuita do OpenAlex.
+**Critérios**, das revisões que você trouxe:
 
-## 4. Celular e sincronização
+| Item | Critérios |
+|---|---|
+| Pergunta | Novidade, originalidade, impacto/relevância, rigor metodológico, alinhamento com a revista |
+| Hipótese | Testabilidade (5E), novidade, fundamentação, viabilidade, rigor, coerência com a pergunta |
+| Contrafactual | Plausibilidade, consistência teórica, proximidade dos dados, identificabilidade, pressupostos explícitos, coerência com a hipótese |
 
-1. No celular, abra o endereço e use "Adicionar à tela inicial".
-2. Para sincronizar com o PC, use o mesmo ID de cliente OAuth do LabResearch:
-   - No Google Cloud Console, confirme que `https://hgribeirogeo.github.io` está nas origens JavaScript autorizadas e que a Google Drive API está ativa.
-   - Cole o ID em Configurações e toque em "Conectar e sincronizar" nos dois aparelhos.
-   - Os dados ficam na pasta oculta do aplicativo no seu Drive. As chaves de API não são sincronizadas.
-3. Uma crítica pedida no celular sem IA entra na fila. Ela roda quando o PC abre o app e sincroniza.
-4. Em conflito, vence a versão mais recente **de cada projeto**. Evite editar o mesmo projeto nos dois aparelhos sem sincronizar entre uma edição e outra.
+**Regra da novidade:**
+- **atende** só com índice ≥ 70 e nenhum artigo que já responde;
+- **parcial** com 1 ou 2 artigos que já respondem, ou índice entre 40 e 69;
+- **não atende** com 3 ou mais, ou índice abaixo de 40.
 
-## 5. Roteiro do primeiro teste (Programa A — MRV)
+## Programa
 
-1. **Novo projeto.** Escreva o esboço sem consultar a pergunta-mãe da carteira de temas. Ela foi redigida pelo Claude e contaminaria o teste.
-2. **Estágio 1.** Escreva, faça a autoavaliação e peça a crítica N1. Registre uma decisão para cada crítica com nota até 3.
-3. **Literatura.**
-   - Faça ao menos uma busca por termos (Semantic Scholar) e importe o CSV do Consensus.
-   - Escreva os critérios de triagem e rode a triagem.
-   - Defina dois ou três campos de extração e rode a extração.
-   - Fixe o limiar, sorteie a amostra de 30 e codifique às cegas.
-   - Escreva a afirmação de lacuna, classifique o corpus, leia a lista obrigatória e declare a lacuna.
-4. **Volte ao estágio 1** e declare o portão.
-5. **Anote** para cada etapa: tempo de máquina, tempo seu e o que travou. Esses números calibram a versão 0.2.
+Registre o resultado de cada estudo do programa (MRV, temperatura do ar): corroborada, refutada ou inconclusiva, com a severidade do teste (1 a 3) e o contexto. O índice de corroboração é 100 × Σ severidade dos corroborados ÷ Σ severidade dos conclusivos, mostrado junto com o número de contextos distintos. Ele mede o quanto as hipóteses do programa resistiram aos testes. Não mede a aceitação pela comunidade.
 
-## 6. O que foi testado e o que não foi
+## Limites
 
-Antes da entrega, 44 verificações automáticas rodaram no Chrome com um Qwen simulado e as APIs externas interceptadas. Elas cobriram:
-- **Estágios e crítico:** fluxo dos estágios, bloqueios dos níveis de ajuda e decisões obrigatórias.
-- **Verificações de evidência:** trechos e DOIs inventados são sinalizados.
-- **Literatura:** importação do seu CSV do Consensus (11 registros), deduplicação por DOI, triagem, extração com trecho verificado, validação com kappa, mapa, grupos, núcleo e lacuna.
-- **Matriz e DAG:** detecção de linhas idênticas na matriz e caminhos pela porta dos fundos no DAG.
-- **Resto:** fila offline, persistência e layout no celular.
-
-**Não testado aqui, e a testar por você:**
-- a qualidade real das respostas do Qwen 14B;
-- o tempo real por artigo na sua RTX 3060;
-- a busca real no Semantic Scholar a partir do navegador;
-- a permissão de rede local do Chrome com o Ollama;
-- a sincronização com o Google Drive.
-
-Para repetir os testes: `python testes/mock_ollama.py` em um terminal, `python -m http.server 8080` na pasta do app em outro, e `python testes/e2e.py`. Requer Playwright e Chrome.
-
-## Limites conhecidos da v0.1
-
-- A extração usa só título e resumo. A busca de texto completo de acesso aberto (Unpaywall) fica para a v0.2.
-- O dossiê é gerado como página para imprimir em PDF pelo navegador.
-- A nota do crítico não é verdade de referência. A calibração real vem dos pareceres dos periódicos.
+- **Índice de novidade:** depende das consultas, da cobertura do Semantic Scholar e do que os resumos dizem. Confira sempre os artigos marcados como "já responde".
+- **Qwen 14B:** os julgamentos podem errar. Por isso cada cartão mostra a evidência, e a palavra final é sua.
+- **Testes:** 33 verificações automáticas passaram, com Qwen, Semantic Scholar e GitHub simulados. Ainda falta a primeira análise real no seu PC, com o Gist e o catálogo reais do LabResearch.
