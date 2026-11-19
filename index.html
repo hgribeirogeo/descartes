@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Descartes</title>
+<meta name="theme-color" content="#1f3a5f">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--muted:#5d6670;--line:#dde1e6;
+  --acc:#1f3a5f;--acc2:#2f6db5;--ok:#1e7d4f;--warn:#b26a00;--bad:#b3261e;
+  --chip:#eef2f7;--radius:10px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#121417;--card:#1b1f24;--ink:#e8eaed;--muted:#9aa3ad;--line:#2d333a;
+  --acc:#8fb3e0;--acc2:#6aa0e6;--ok:#5cc58f;--warn:#e0a54a;--bad:#ef7b72;--chip:#252b33;}
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);
+  display:flex;gap:10px;align-items:center;padding:8px 14px;flex-wrap:wrap}
+header .brand{font-weight:700;font-size:18px;color:var(--acc);margin-right:6px}
+header nav{display:flex;gap:4px;flex-wrap:wrap}
+header nav button{background:none;border:0;padding:6px 10px;border-radius:8px;color:var(--muted);cursor:pointer;font:inherit}
+header nav button.on{background:var(--chip);color:var(--ink);font-weight:600}
+header .grow{flex:1}
+main{max-width:1180px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px}
+.card h2{margin:0 0 8px;font-size:18px}
+.card h3{margin:12px 0 6px;font-size:15px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.col{display:flex;flex-direction:column;gap:6px}
+.grid2{display:grid;grid-template-columns:240px 1fr;gap:14px}
+@media (max-width:820px){.grid2{grid-template-columns:1fr}}
+.grid2>div{min-width:0}
+.card{overflow-wrap:anywhere}
+label{font-size:13px;color:var(--muted);font-weight:600}
+input[type=text],input[type=number],input[type=password],input[type=url],select,textarea{
+  width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:90px;resize:vertical}
+button.b{background:var(--acc2);color:#fff;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit;font-size:14px}
+button.b.sec{background:var(--chip);color:var(--ink);border:1px solid var(--line)}
+button.b.danger{background:var(--bad)}
+button.b:disabled{opacity:.45;cursor:not-allowed}
+.stepper{display:flex;flex-direction:column;gap:4px}
+@media (max-width:820px){.stepper{flex-direction:row;overflow-x:auto}}
+.step{border:1px solid var(--line);border-radius:8px;padding:7px 10px;cursor:pointer;background:var(--card);white-space:nowrap}
+.step.on{border-color:var(--acc2);box-shadow:0 0 0 1px var(--acc2)}
+.step .st{font-size:12px}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;background:var(--chip);color:var(--muted)}
+.pill.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.pill.bad{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:13px}
+.crit{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0}
+.crit.obr{border-left:4px solid var(--acc2)}
+.scores{display:flex;gap:4px;flex-wrap:wrap}
+.scores button{width:30px;height:28px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);cursor:pointer}
+.scores button.on{background:var(--acc2);color:#fff;border-color:var(--acc2)}
+.quote{border-left:3px solid var(--line);padding:2px 8px;margin:4px 0;color:var(--muted);font-style:italic}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
+.tabs button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 10px;cursor:pointer;color:var(--ink);font:inherit;font-size:14px}
+.tabs button.on{background:var(--acc2);color:#fff;border-color:var(--acc2)}
+.progress{height:8px;background:var(--chip);border-radius:6px;overflow:hidden}
+.progress>div{height:100%;background:var(--acc2)}
+.mx td,.mx th{text-align:center}
+.mx select{width:auto;padding:2px 4px}
+.cell0{background:color-mix(in srgb,var(--warn) 22%,transparent)}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+  padding:8px 14px;border-radius:8px;font-size:14px;display:none;z-index:20;max-width:90vw}
+.rec{border-bottom:1px solid var(--line);padding:8px 0}
+.rec .t{font-weight:600}
+details summary{cursor:pointer}
+.kpi{display:inline-block;margin-right:18px}
+.kpi b{font-size:20px;display:block}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Descartes</span>
+  <select id="projSel" style="width:auto;max-width:240px"></select>
+  <nav id="nav"></nav>
+  <span class="grow"></span>
+  <span id="llmStatus" class="pill">IA: verificando…</span>
+  <span id="syncStatus" class="pill">local</span>
+</header>
+<main id="app"></main>
+<div id="toast"></div>
+<script>
+
+/* ---- core.js ---- */
+'use strict';
+/* ================= Descartes v0.1 — núcleo ================= */
+const VERSION = '0.1.1';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const nowISO = () => new Date().toISOString();
+const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-BR', {dateStyle:'short', timeStyle:'short'}) : '';
+function toast(msg, ms=3200){ const t=$('#toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.display='none', ms); }
+function hashStr(s){ let h=0; for(let i=0;i<s.length;i++){ h=((h<<5)-h+s.charCodeAt(i))|0; } return h.toString(36); }
+
+/* Normalização para verificar trechos citados (o trecho precisa existir no texto-fonte) */
+function normTxt(s){
+  return String(s||'').normalize('NFKC').toLowerCase()
+    .replace(/[‘’‚′]/g,"'").replace(/[“”„″]/g,'"')
+    .replace(/[‐-―−]/g,'-').replace(/\s+/g,' ').trim();
+}
+function quoteOK(quote, source){
+  const q = normTxt(quote).replace(/^["'\s.,;:]+|["'\s.,;:]+$/g,'');
+  if (q.length < 6) return false;
+  const src = normTxt(source);
+  const parts = q.split(/\s*(?:\.\.\.|…|\[\.\.\.\])\s*/).filter(p => p.length >= 4);
+  if (!parts.length) return false;
+  return parts.every(p => src.includes(p));
+}
+
+/* ---------- IndexedDB ---------- */
+const DB = {
+  db:null,
+  open(){ return new Promise((res,rej)=>{ const r=indexedDB.open('descartes',1);
+    r.onupgradeneeded=()=>{ const d=r.result; d.createObjectStore('projects',{keyPath:'id'}); d.createObjectStore('kv'); };
+    r.onsuccess=()=>{ DB.db=r.result; res(); }; r.onerror=()=>rej(r.error); }); },
+  tx(store, mode='readonly'){ return DB.db.transaction(store, mode).objectStore(store); },
+  all(store){ return new Promise((res,rej)=>{ const r=DB.tx(store).getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); },
+  put(store, val, key){ return new Promise((res,rej)=>{ const r=key===undefined?DB.tx(store,'readwrite').put(val):DB.tx(store,'readwrite').put(val,key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); },
+  get(store, key){ return new Promise((res,rej)=>{ const r=DB.tx(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); },
+  del(store, key){ return new Promise((res,rej)=>{ const r=DB.tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); },
+};
+
+/* ---------- Estado ---------- */
+const DEFAULT_CONFIG = {
+  provider:'ollama', ollamaBase:'http://localhost:11434', ollamaModel:'qwen3:14b', embedModel:'qwen3-embedding:0.6b',
+  allowOpenRouter:false, openrouterKey:'', openrouterModel:'qwen/qwen3-next-80b-a3b-instruct:free',
+  openalexKey:'', email:'', googleClientId:'', temperature:0.2,
+};
+const S = { config:{...DEFAULT_CONFIG}, projects:[], currentId:null, view:'projeto', stage:0, litTab:'fontes', busy:{} };
+const cur = () => S.projects.find(p => p.id === S.currentId) || null;
+
+function newProject(title){
+  const p = { id:uid('p'), title, createdAt:nowISO(), updatedAt:nowISO(),
+    stages:{}, diary:[], critiques:[], queue:[], gates:{},
+    matrix:{hyps:[{id:uid('h'),name:'H1'},{id:uid('h'),name:'H2'},{id:uid('h'),name:'H0 artefato'}], preds:[{id:uid('c'),name:'Previsão A'},{id:uid('c'),name:'Previsão B'}], cells:{}},
+    dag:{edges:'', exposure:'', outcome:'', adjust:[]},
+    lit:{ records:[], searches:[], criteria:'', schema:[], validation:{threshold:0.6, locked:false, sample:[], manual:{}, equiv:{}, done:false},
+          gap:{claim:'', declared:false, justification:'', decisions:{}}, clusters:null, core:[], coreNotes:{}, k:6 },
+  };
+  for (const st of STAGES) p.stages[st.id] = { fields:{}, self:{}, time:0, helpLevel:0, lastHelpHash:null };
+  return p;
+}
+
+let saveTimer=null;
+function touch(p=cur()){ if(!p) return; p.updatedAt = nowISO(); clearTimeout(saveTimer); saveTimer=setTimeout(()=>persist(p), 400); }
+async function persist(p){ try{ await DB.put('projects', p); if (typeof Sync!=='undefined') Sync.schedule(); }catch(e){ console.error(e); toast('Erro ao salvar: '+e.message); } }
+async function saveConfig(){ await DB.put('kv', S.config, 'config'); }
+
+/* ---------- Navegação ---------- */
+const VIEWS = [['projeto','Concepção'],['literatura','Literatura'],['diario','Diário'],['metricas','Métricas'],['config','Configurações']];
+function renderNav(){
+  $('#nav').innerHTML = VIEWS.map(([k,l]) => `<button data-act="view" data-v="${k}" class="${S.view===k?'on':''}">${l}</button>`).join('');
+  const sel = $('#projSel');
+  sel.innerHTML = S.projects.map(p => `<option value="${p.id}" ${p.id===S.currentId?'selected':''}>${esc(p.title)}</option>`).join('') + `<option value="__new">+ Novo projeto…</option>`;
+}
+function render(){
+  renderNav();
+  const p = cur(); const app = $('#app');
+  if (!p && S.view!=='config'){ app.innerHTML = `<div class="card"><h2>Bem-vindo ao Descartes</h2><p>Crie um projeto para começar. Cada projeto percorre os estágios do esboço à teoria.</p><button class="b" data-act="newProject">Novo projeto</button></div>`; return; }
+  if (S.view==='projeto') app.innerHTML = renderStageView(p);
+  else if (S.view==='literatura') app.innerHTML = renderLit(p);
+  else if (S.view==='diario') app.innerHTML = renderDiary(p);
+  else if (S.view==='metricas') app.innerHTML = renderMetrics();
+  else if (S.view==='config') app.innerHTML = renderConfig();
+  if (S.view==='projeto' && typeof afterStageRender==='function') afterStageRender(p);
+}
+
+/* ---------- Eventos (delegação) ---------- */
+const ACTIONS = {};
+document.addEventListener('click', async ev => {
+  const el = ev.target.closest('[data-act]'); if (!el) return;
+  const fn = ACTIONS[el.dataset.act]; if (!fn) return;
+  ev.preventDefault();
+  try { await fn(el, ev); } catch(e){ console.error(e); toast('Erro: '+e.message, 6000); }
+});
+document.addEventListener('input', ev => {
+  const el = ev.target; const p = cur();
+  if (el.dataset.bind && p){ setPath(p, el.dataset.bind, el.type==='number'? Number(el.value) : el.value); touch(p); S.lastActivity = Date.now();
+    if (el.dataset.rerender || S.view==='projeto') debounceRender(); }
+  if (el.dataset.cfg){ S.config[el.dataset.cfg] = el.type==='checkbox' ? el.checked : (el.type==='number'?Number(el.value):el.value); saveConfig(); }
+});
+document.addEventListener('change', ev => {
+  const el = ev.target; const p = cur();
+  if (el.id==='projSel'){ if (el.value==='__new') ACTIONS.newProject(); else { S.currentId=el.value; DB.put('kv', S.currentId, 'currentId'); render(); } return; }
+  if (el.dataset.bindc && p){ setPath(p, el.dataset.bindc, el.type==='checkbox'?el.checked:el.value); touch(p); render(); }
+  if (el.dataset.cfg && (el.type==='checkbox' || el.tagName==='SELECT')){ S.config[el.dataset.cfg] = el.type==='checkbox'?el.checked:el.value; saveConfig(); if (el.dataset.cfg==='provider'||el.dataset.cfg==='allowOpenRouter') LLM.checkStatus(); }
+  if (el.dataset.chg && ACTIONS[el.dataset.chg]) ACTIONS[el.dataset.chg](el, ev);
+});
+let rrT=null; function debounceRender(){ clearTimeout(rrT); rrT=setTimeout(()=>{ const a=document.activeElement; const id=a&&a.id; const pos=a&&a.selectionStart; render(); if(id){ const n=document.getElementById(id); if(n){ n.focus(); try{ n.setSelectionRange(pos,pos);}catch(e){} } } }, 700); }
+
+function setPath(obj, path, val){ const ks=path.split('.'); let o=obj; for(let i=0;i<ks.length-1;i++){ if(o[ks[i]]==null) o[ks[i]]={}; o=o[ks[i]]; } o[ks[ks.length-1]]=val; }
+function getPath(obj, path){ return path.split('.').reduce((o,k)=>o==null?undefined:o[k], obj); }
+
+ACTIONS.view = el => { S.view = el.dataset.v; render(); window.scrollTo(0,0); };
+ACTIONS.newProject = () => {
+  const t = prompt('Nome do projeto (ex.: MRV — permanência da vegetação):'); if (!t) { renderNav(); return; }
+  const p = newProject(t.trim()); S.projects.push(p); S.currentId=p.id; S.view='projeto'; S.stage=0;
+  DB.put('kv', p.id, 'currentId'); persist(p); render();
+};
+ACTIONS.renameProject = () => { const p=cur(); const t=prompt('Novo nome:', p.title); if(t){ p.title=t.trim(); touch(p); render(); } };
+ACTIONS.deleteProject = async () => { const p=cur(); if(!confirm(`Excluir o projeto "${p.title}" deste aparelho? Exporte um backup antes.`)) return;
+  await DB.del('projects', p.id); S.projects = S.projects.filter(x=>x.id!==p.id); S.currentId = S.projects[0]?.id || null; if(typeof Sync!=='undefined') Sync.markDeleted(p.id); render(); };
+
+/* ---------- Diário ---------- */
+function logDiary(p, entry){ p.diary.push({ id:uid('d'), at:nowISO(), ...entry }); touch(p); }
+function renderDiary(p){
+  const rows = [...p.diary].reverse().map(d => `<tr><td class="small">${fmtDate(d.at)}</td><td>${esc(d.stageName||'')}</td><td>${esc(d.kind)}</td><td>${esc(d.text||'')}</td><td>${d.decision?`<span class="pill ${d.decision==='aceita'?'ok':d.decision==='rejeitada'?'bad':'warn'}">${esc(d.decision)}</span>`:''}</td><td>${esc(d.justification||'')}</td></tr>`).join('');
+  return `<div class="card"><h2>Diário de decisões — ${esc(p.title)}</h2>
+  <p class="muted small">Cada crítica recebida exige uma decisão sua. O diário entra no dossiê exportado.</p>
+  <table><tr><th>Data</th><th>Estágio</th><th>Tipo</th><th>Conteúdo</th><th>Decisão</th><th>Justificativa</th></tr>${rows||'<tr><td colspan="6" class="muted">Nada registrado ainda.</td></tr>'}</table></div>`;
+}
+
+/* ---------- Tempo ativo por estágio ---------- */
+S.lastActivity = Date.now();
+document.addEventListener('keydown', ()=>S.lastActivity=Date.now());
+document.addEventListener('pointerdown', ()=>S.lastActivity=Date.now());
+setInterval(()=>{ const p=cur(); if(!p||S.view!=='projeto'||document.hidden) return; if(Date.now()-S.lastActivity>120000) return;
+  const st=p.stages[STAGES[S.stage].id]; st.time=(st.time||0)+15; touch(p); }, 15000);
+
+/* ---------- Inicialização ---------- */
+async function boot(){
+  await DB.open();
+  const cfg = await DB.get('kv','config'); if (cfg) S.config = {...DEFAULT_CONFIG, ...cfg};
+  S.projects = await DB.all('projects');
+  for (const p of S.projects) migrate(p);
+  S.currentId = (await DB.get('kv','currentId')) || S.projects[0]?.id || null;
+  if (!S.projects.find(p=>p.id===S.currentId)) S.currentId = S.projects[0]?.id || null;
+  render();
+  LLM.checkStatus().then(()=>Queue.process());
+  if (typeof Sync!=='undefined') Sync.init();
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+function migrate(p){
+  const base = newProject(p.title);
+  for (const k of Object.keys(base)) if (p[k]===undefined) p[k]=base[k];
+  for (const st of STAGES) if (!p.stages[st.id]) p.stages[st.id] = base.stages[st.id];
+  for (const k of Object.keys(base.lit)) if (p.lit[k]===undefined) p.lit[k]=base.lit[k];
+}
+
+/* ---- stages.js ---- */
+/* ================= Estágios, rubricas, portões, matriz, DAG ================= */
+const SCALE = ['Ausente','Mencionado, sem conteúdo','Presente, mas vago ou não verificável','Específico, com falha que um revisor apontaria','Específico e verificável, com ressalvas menores','Específico, verificável e sem ressalva previsível de um revisor Q1'];
+
+const STAGES = [
+ { id:'s0', name:'0. Esboço', desc:'Observação ou intuição livre. Escreva sem se preocupar com forma.', min:40,
+   fields:[{id:'esboco', label:'Esboço', type:'textarea', rows:8}], criteria:[] },
+ { id:'s1', name:'1. Fenômeno e anomalia', desc:'O que se observa, o que se sabe e onde está a tensão com o conhecimento atual. O portão também exige a auditoria da lacuna (Literatura → Lacuna).', min:150,
+   fields:[{id:'fenomeno',label:'Fenômeno observado (extensão, resolução, período)',type:'textarea'},{id:'conhecimento',label:'O que já se sabe (com fontes)',type:'textarea'},{id:'tensao',label:'Tensão ou anomalia (até 3 frases)',type:'textarea'},{id:'consequencia',label:'Consequência prática ou teórica',type:'textarea',rows:3}],
+   criteria:[{id:'c1a',t:'Fenômeno delimitado em extensão, resolução e período',o:1},{id:'c1b',t:'Tensão com o conhecimento atual apontada com fonte',o:1},{id:'c1c',t:'Sinal do fenômeno distinguido do sinal do sensor ou do produto',o:1},{id:'c1d',t:'Consequência prática (MRV, política, gestão) ou teórica',o:0}] },
+ { id:'s2', name:'2. Pergunta', desc:'A pergunta em uma frase, com unidade de análise, escala e população.', min:120,
+   fields:[{id:'pergunta',label:'Pergunta (uma frase)',type:'textarea',rows:2},{id:'unidade',label:'Unidade de análise (pixel, polígono, imóvel, hexágono, bacia, estação)',type:'text'},{id:'escala',label:'Escala, resolução e dependência de escala',type:'textarea',rows:3},{id:'populacao',label:'População, extensão e período',type:'text'},{id:'edai',label:'E daí? Que crença ou decisão muda com cada resposta possível',type:'textarea',rows:3}],
+   criteria:[{id:'c2a',t:'Mecanística ou de limite de medição (por quê, como, com que erro)',o:1},{id:'c2b',t:'Unidade de análise explícita',o:1},{id:'c2c',t:'Dependência de escala considerada (MAUP, resolução do sensor)',o:1},{id:'c2d',t:'Respondível com dados alcançáveis',o:0},{id:'c2e',t:'Respostas possíveis mudam uma crença ou decisão',o:0}] },
+ { id:'s3', name:'3. Mecanismos rivais', desc:'Três ou mais explicações concorrentes, incluindo artefatos de dados e variação natural. Cada rival deve ser um processo, não um rótulo.', min:150,
+   fields:[{id:'rivals',label:'Rivais',type:'rivals'}],
+   criteria:[{id:'c3a',t:'Cada rival é um processo, não um rótulo',o:1},{id:'c3b',t:'Inclui artefatos de dados: troca ou degradação de sensor, melhora da detecção no tempo, lacunas de nuvem sazonais, erro de co-registro, rótulos herdados de outro mapa',o:1},{id:'c3c',t:'Inclui variação natural: fenologia, seca, fogo, regime de chuvas',o:1}] },
+ { id:'s4', name:'4. Hipóteses e previsões', desc:'Matriz hipótese × previsão. Duas linhas iguais significam hipóteses que o estudo não distingue.', min:60,
+   fields:[{id:'matrix',label:'Matriz',type:'matrix'},{id:'notas',label:'Como cada previsão será medida',type:'textarea'}],
+   criteria:[{id:'c4a',t:'Nenhuma linha idêntica a outra',o:1},{id:'c4b',t:'Cada previsão mensurável nos dados disponíveis',o:1},{id:'c4c',t:'Ao menos uma previsão separa o mecanismo dos artefatos',o:1},{id:'c4d',t:'Previsões espaciais ou temporais (padrão no espaço, dependência de escala, sazonalidade)',o:0}] },
+ { id:'s5', name:'5. Contrafactual e identificação', desc:'Controles, DAG com confundidores, contágio espacial e o contrafactual epistêmico.', min:200,
+   fields:[{id:'dag',label:'DAG',type:'dag'},{id:'controles',label:'Áreas ou períodos de controle e fonte dos dados',type:'textarea'},{id:'contagio',label:'Contágio espacial entre tratados e controles',type:'textarea',rows:3},{id:'desenho',label:'Desenho (BACI, DiD, controle sintético, pareamento, descontinuidade espacial)',type:'text'},{id:'seVerdadeira',label:'Se a hipótese for VERDADEIRA, eu observaria…',type:'textarea',rows:3},{id:'seFalsa',label:'Se a hipótese for FALSA, eu observaria…',type:'textarea',rows:3}],
+   criteria:[{id:'c5a',t:'Áreas ou períodos de controle definidos, com fonte de dados',o:1},{id:'c5b',t:'Confundidores espaciais no DAG (declividade, acesso, solo, fitofisionomia, clima)',o:1},{id:'c5c',t:'Contágio espacial entre tratados e controles avaliado',o:1},{id:'c5d',t:'Resultado esperado se a hipótese for falsa difere do esperado se verdadeira',o:1},{id:'c5e',t:'Desenho nomeado',o:0}] },
+ { id:'s6', name:'6. Teste decisivo e viabilidade', desc:'Métrica, limiar definido antes dos dados, validação, poder e horas. O resultado alimenta a Fase 0 do PAP.', min:200,
+   fields:[{id:'metrica',label:'Métrica e limiar de decisão (definidos antes dos dados)',type:'textarea',rows:3},{id:'validacao',label:'Validação: amostra probabilística estratificada, estimadores',type:'textarea',rows:3},{id:'espacial',label:'Validação espacial (blocos, regiões) e área de aplicabilidade',type:'textarea',rows:3},{id:'dados',label:'Fontes de dados confirmadas e processamento (GEE, nuvem)',type:'textarea',rows:3},{id:'poder',label:'Análise de poder ou justificativa do tamanho amostral',type:'textarea',rows:3},{id:'horas',label:'Horas de interpretação manual estimadas',type:'text'}],
+   criteria:[{id:'c6a',t:'Limiar de decisão definido antes dos dados',o:1},{id:'c6b',t:'Validação por amostra probabilística estratificada com estimadores pelo desenho (Olofsson et al. 2014; Stehman 2014)',o:1},{id:'c6c',t:'Validação espacial por blocos ou regiões, com área de aplicabilidade quando houver extrapolação (Meyer e Pebesma 2021)',o:1},{id:'c6d',t:'Fonte de dados confirmada e processável no GEE ou na nuvem',o:1},{id:'c6e',t:'Análise de poder',o:0},{id:'c6f',t:'Horas de interpretação manual estimadas',o:0}] },
+ { id:'s7', name:'7. Posição teórica', desc:'Teoria do processo, teoria da medição, condições de escopo e próximo teste do programa.', min:150,
+   fields:[{id:'tProcesso',label:'Contribuição para a teoria do processo ambiental (com referência)',type:'textarea',rows:3},{id:'tMedicao',label:'Contribuição para a teoria da medição: o que o satélite consegue saber e com que erro (com referência)',type:'textarea',rows:3},{id:'escopo',label:'Condições de escopo (bioma, fitofisionomia, sensor, escala)',type:'textarea',rows:3},{id:'proximo',label:'Próximo teste do programa',type:'textarea',rows:3}],
+   criteria:[{id:'c7a',t:'Declara contribuição para a teoria do processo, da medição ou ambas, com referência',o:1},{id:'c7b',t:'Condições de escopo (bioma, fitofisionomia, sensor, escala)',o:0},{id:'c7c',t:'Próximo teste do programa',o:0}] },
+];
+const stageById = id => STAGES.find(s=>s.id===id);
+function afterStageRender(){}
+
+/* ---------- Texto compilado de um estágio (o que o crítico lê) ---------- */
+function stageText(p, st){
+  const f = p.stages[st.id].fields; const out=[];
+  for (const fd of st.fields){
+    if (fd.type==='rivals'){ const rv=f.rivals||[]; out.push('RIVAIS:\n'+rv.map((r,i)=>`R${i+1} [${r.tipo||'?'}] ${r.nome||''}: ${r.processo||''}`).join('\n')); }
+    else if (fd.type==='matrix'){ out.push('MATRIZ HIPÓTESE × PREVISÃO:\n'+matrixText(p)); }
+    else if (fd.type==='dag'){ const d=p.dag; out.push(`DAG (arestas):\n${d.edges}\nExposição: ${d.exposure}; Desfecho: ${d.outcome}; Ajustados: ${(d.adjust||[]).join(', ')}`); }
+    else if ((f[fd.id]||'').trim()) out.push(`${fd.label.toUpperCase()}:\n${f[fd.id]}`);
+  }
+  return out.join('\n\n');
+}
+function stageTextLen(p, st){ return stageText(p, st).replace(/^[A-ZÀ-Ú ,().×\-:\/]+:\n/gm,'').trim().length; }
+
+/* ---------- Avaliação do portão ---------- */
+function selfComplete(p, st){ return st.criteria.every(c => Number.isInteger(p.stages[st.id].self[c.id])); }
+function gateCheck(p, st){
+  const s = p.stages[st.id]; const issues=[];
+  if (stageTextLen(p, st) < st.min) issues.push(`Texto ainda curto (mínimo de ${st.min} caracteres de conteúdo).`);
+  for (const c of st.criteria){ const v=s.self[c.id]; if(!Number.isInteger(v)) { issues.push('Autoavaliação incompleta.'); break; } }
+  for (const c of st.criteria){ const v=s.self[c.id]; if(Number.isInteger(v) && v < (c.o?4:3)) issues.push(`"${c.t.slice(0,60)}…" com nota ${v} (mínimo ${c.o?4:3}).`); }
+  if (pendingDecisions(p, st.id).length) issues.push('Há críticas sem decisão registrada.');
+  if (st.id==='s1' && !gapDeclared(p)) issues.push('Auditoria da lacuna não concluída (Literatura → Lacuna).');
+  if (st.id==='s3' && (p.stages.s3.fields.rivals||[]).filter(r=>(r.nome||'').trim()).length < 3) issues.push('Menos de três rivais.');
+  if (st.id==='s4'){ const m=matrixCheck(p); if (m.problems.length) issues.push(...m.problems); }
+  return issues;
+}
+function stageStatus(p, st){
+  if (p.gates[st.id]) return ['ok','portão cumprido'];
+  const f=p.stages[st.id].fields;
+  const anyText = st.fields.some(fd => fd.type==='rivals' ? (f.rivals||[]).some(r=>(r.nome||r.processo||'').trim()) : fd.type==='matrix' ? Object.values(p.matrix.cells).some(Boolean) : fd.type==='dag' ? !!p.dag.edges.trim() : !!(f[fd.id]||'').trim());
+  if (Queue.pendingFor(p, st.id)) return ['warn','crítica na fila'];
+  return anyText ? ['warn','em andamento'] : ['','não iniciado'];
+}
+
+/* ---------- Renderização do estágio ---------- */
+function renderStageView(p){
+  const st = STAGES[S.stage];
+  const steps = STAGES.map((s,i)=>{ const [cls,lab]=stageStatus(p,s); return `<div class="step ${i===S.stage?'on':''}" data-act="stage" data-i="${i}"><div>${esc(s.name)}</div><div class="st"><span class="pill ${cls}">${lab}</span></div></div>`; }).join('');
+  return `<div class="grid2"><div><div class="stepper">${steps}</div>
+    <div class="card small" style="margin-top:12px"><b>${esc(p.title)}</b><br><span class="muted">Criado em ${fmtDate(p.createdAt)}</span><div class="row" style="margin-top:8px"><button class="b sec" data-act="renameProject">Renomear</button><button class="b sec" data-act="exportDossier">Dossiê</button></div></div></div>
+  <div>
+    <div class="card"><h2>${esc(st.name)}</h2><p class="muted">${esc(st.desc)}</p>${p.gates[st.id]?`<p><span class="pill ok">Portão cumprido em ${fmtDate(p.gates[st.id].at)}</span> <button class="b sec" data-act="reopen">Reabrir estágio</button></p>`:''}
+      ${st.fields.map(f=>renderField(p, st, f)).join('')}
+      <p class="small muted">Tempo ativo neste estágio: ${Math.round((p.stages[st.id].time||0)/60)} min</p></div>
+    ${st.criteria.length?renderRubric(p, st):''}
+    ${st.criteria.length?renderCritic(p, st):''}
+    ${renderGate(p, st)}
+  </div></div>`;
+}
+function renderField(p, st, f){
+  const path = `stages.${st.id}.fields.${f.id}`; const val = getPath(p, path) || '';
+  if (f.type==='textarea') return `<div class="col" style="margin:8px 0"><label for="f_${st.id}_${f.id}">${esc(f.label)}</label><textarea id="f_${st.id}_${f.id}" rows="${f.rows||5}" data-bind="${path}">${esc(val)}</textarea></div>`;
+  if (f.type==='text') return `<div class="col" style="margin:8px 0"><label for="f_${st.id}_${f.id}">${esc(f.label)}</label><input type="text" id="f_${st.id}_${f.id}" data-bind="${path}" value="${esc(val)}"></div>`;
+  if (f.type==='rivals') return renderRivals(p);
+  if (f.type==='matrix') return renderMatrix(p);
+  if (f.type==='dag') return renderDag(p);
+  return '';
+}
+ACTIONS.stage = el => { S.stage = Number(el.dataset.i); render(); window.scrollTo(0,0); };
+
+/* ---------- Rivais ---------- */
+function renderRivals(p){
+  const rv = p.stages.s3.fields.rivals || (p.stages.s3.fields.rivals = []);
+  const tipos = ['mecanismo','artefato de dados','variação natural'];
+  return `<div style="margin:8px 0">${rv.map((r,i)=>`<div class="crit"><div class="row"><b>R${i+1}</b>
+    <input type="text" id="rv_n_${i}" style="flex:1;min-width:180px" placeholder="Nome curto" data-bind="stages.s3.fields.rivals.${i}.nome" value="${esc(r.nome||'')}">
+    <select data-bindc="stages.s3.fields.rivals.${i}.tipo" style="width:auto"><option value="">tipo…</option>${tipos.map(t=>`<option ${r.tipo===t?'selected':''}>${t}</option>`).join('')}</select>
+    <button class="b sec" data-act="delRival" data-i="${i}">Remover</button></div>
+    <textarea id="rv_p_${i}" rows="3" placeholder="Descreva o processo: o que acontece, em que ordem, e por que produziria o padrão observado" data-bind="stages.s3.fields.rivals.${i}.processo">${esc(r.processo||'')}</textarea></div>`).join('')}
+    <button class="b sec" data-act="addRival">+ Rival</button></div>`;
+}
+ACTIONS.addRival = () => { const p=cur(); (p.stages.s3.fields.rivals ||= []).push({nome:'',tipo:'',processo:''}); touch(p); render(); };
+ACTIONS.delRival = el => { const p=cur(); p.stages.s3.fields.rivals.splice(Number(el.dataset.i),1); touch(p); render(); };
+
+/* ---------- Matriz hipótese × previsão ---------- */
+const MX_VALS = ['', '↑', '↓', '=', '?'];
+function matrixText(p){ const m=p.matrix; return ['Hipótese | '+m.preds.map(c=>c.name).join(' | '), ...m.hyps.map(h=>h.name+' | '+m.preds.map(c=>m.cells[h.id+'|'+c.id]||'?').join(' | '))].join('\n'); }
+function matrixCheck(p){
+  const m=p.matrix; const problems=[]; const warns=[]; const sig = h => m.preds.map(c=>m.cells[h.id+'|'+c.id]||'?').join(',');
+  if (m.hyps.length<2) problems.push('A matriz precisa de ao menos duas hipóteses.');
+  if (m.preds.length<1) problems.push('A matriz precisa de ao menos uma previsão.');
+  const seen={}; const dupRows=new Set();
+  for (const h of m.hyps){ const s=sig(h); if (seen[s]!==undefined){ dupRows.add(h.id); dupRows.add(seen[s]); } else seen[s]=h.id; }
+  if (dupRows.size) problems.push('Linhas idênticas: '+m.hyps.filter(h=>dupRows.has(h.id)).map(h=>h.name).join(', ')+' — o estudo não distingue essas hipóteses.');
+  const uselessCols=[]; const incompleteCols=[];
+  for (const c of m.preds){ const vals=m.hyps.map(h=>m.cells[h.id+'|'+c.id]||'?');
+    if (vals.every(v=>v==='?')) incompleteCols.push(c.name); else if (vals.every(v=>v===vals[0])) uselessCols.push(c.name); }
+  if (uselessCols.length) warns.push('Previsões iguais em todas as hipóteses (não discriminam): '+uselessCols.join(', '));
+  if (incompleteCols.length) problems.push('Previsões sem nenhum valor preenchido: '+incompleteCols.join(', '));
+  return {problems, warns, dupRows};
+}
+function renderMatrix(p){
+  const m=p.matrix; const chk=matrixCheck(p);
+  const head = `<tr><th>Hipótese</th>${m.preds.map((c,j)=>`<th><input type="text" id="mxc_${j}" data-bind="matrix.preds.${j}.name" value="${esc(c.name)}" style="min-width:110px"><button class="b sec small" data-act="mxDelCol" data-i="${j}">×</button></th>`).join('')}<th><button class="b sec" data-act="mxAddCol">+ previsão</button></th></tr>`;
+  const rows = m.hyps.map((h,i)=>`<tr class="${chk.dupRows.has(h.id)?'cell0':''}"><td><input type="text" id="mxr_${i}" data-bind="matrix.hyps.${i}.name" value="${esc(h.name)}" style="min-width:120px"><button class="b sec small" data-act="mxDelRow" data-i="${i}">×</button></td>${m.preds.map(c=>{const k=h.id+'|'+c.id; return `<td><select data-bindc="matrix.cells.${k}">${MX_VALS.map(v=>`<option value="${v}" ${(m.cells[k]||'')===v?'selected':''}>${v||'·'}</option>`).join('')}</select></td>`;}).join('')}<td></td></tr>`).join('');
+  return `<div style="overflow-x:auto;margin:8px 0"><table class="mx">${head}${rows}</table></div>
+  <button class="b sec" data-act="mxAddRow">+ hipótese</button>
+  <p class="small muted">↑ aumenta · ↓ diminui · = sem mudança · ? indefinido</p>
+  ${chk.problems.map(x=>`<div class="pill bad" style="margin:2px 0">${esc(x)}</div>`).join(' ')} ${chk.warns.map(x=>`<div class="pill warn" style="margin:2px 0">${esc(x)}</div>`).join(' ')}
+  ${!chk.problems.length&&!chk.warns.length?'<span class="pill ok">Matriz discriminante</span>':''}`;
+}
+ACTIONS.mxAddRow = () => { const p=cur(); p.matrix.hyps.push({id:uid('h'),name:'H'+(p.matrix.hyps.length+1)}); touch(p); render(); };
+ACTIONS.mxAddCol = () => { const p=cur(); p.matrix.preds.push({id:uid('c'),name:'Previsão '+String.fromCharCode(65+p.matrix.preds.length)}); touch(p); render(); };
+ACTIONS.mxDelRow = el => { const p=cur(); p.matrix.hyps.splice(Number(el.dataset.i),1); touch(p); render(); };
+ACTIONS.mxDelCol = el => { const p=cur(); p.matrix.preds.splice(Number(el.dataset.i),1); touch(p); render(); };
+
+/* ---------- DAG: caminhos de porta dos fundos (critério de Pearl) ---------- */
+function parseDag(txt){
+  const edges=[]; const nodes=new Set();
+  for (const line of String(txt||'').split(/\n|;/)){ const m=line.split(/\s*(?:->|→)\s*/).map(s=>s.trim()).filter(Boolean);
+    for (let i=0;i<m.length-1;i++){ edges.push([m[i],m[i+1]]); nodes.add(m[i]); nodes.add(m[i+1]); } }
+  return {edges, nodes:[...nodes]};
+}
+function dagAnalysis(d){
+  const {edges,nodes}=parseDag(d.edges); const X=d.exposure, Y=d.outcome, Z=new Set(d.adjust||[]);
+  const res={nodes, edges, paths:[], causal:0, warnings:[]};
+  if (!X||!Y||!nodes.includes(X)||!nodes.includes(Y)) return res;
+  const ch={}, pa={}; nodes.forEach(n=>{ch[n]=[];pa[n]=[];}); edges.forEach(([a,b])=>{ch[a].push(b);pa[b].push(a);});
+  const desc = n => { const out=new Set(); const st=[n]; while(st.length){ const v=st.pop(); for(const c of ch[v]) if(!out.has(c)){out.add(c);st.push(c);} } return out; };
+  // ciclo?
+  for (const n of nodes) if (desc(n).has(n)) { res.warnings.push('O grafo tem ciclo: não é um DAG.'); return res; }
+  const dX=desc(X); for (const z of Z) if (dX.has(z)) res.warnings.push(`"${z}" é descendente da exposição: ajustar por ela pode bloquear o efeito ou abrir viés.`);
+  const nb = n => [...ch[n].map(c=>[c,'out']), ...pa[n].map(q=>[q,'in'])];
+  const paths=[]; const walk=(v,path,dirs)=>{ if(path.length>9) return; if(v===Y){ paths.push({path:[...path],dirs:[...dirs]}); return; }
+    for (const [w,dir] of nb(v)) if(!path.includes(w)){ path.push(w); dirs.push(dir); walk(w,path,dirs); path.pop(); dirs.pop(); } };
+  walk(X,[X],[]);
+  for (const {path,dirs} of paths){
+    const directed = dirs.every(d=>d==='out'); if (directed){ res.causal++; continue; }
+    const backdoor = dirs[0]==='in'; if (!backdoor) continue;
+    let blocked=false; const why=[];
+    for (let i=1;i<path.length-1;i++){ const M=path[i]; const inFromPrev = dirs[i-1]==='out'; const inFromNext = dirs[i]==='in';
+      const collider = inFromPrev && inFromNext;
+      if (collider){ const dM=desc(M); if (!Z.has(M) && ![...Z].some(z=>dM.has(z))){ blocked=true; why.push(`colisor ${M} não ajustado`); } }
+      else if (Z.has(M)){ blocked=true; why.push(`${M} ajustado`); } }
+    const arrows = path.map((n,i)=> i===0? n : (dirs[i-1]==='out' ? ' → ' : ' ← ') + n).join('');
+    res.paths.push({txt:arrows, open:!blocked, why:why.join('; ')});
+  }
+  return res;
+}
+function dagSvg(d, an){
+  const n=an.nodes.length; if(!n) return ''; const W=640,H=Math.max(260, 60+n*18), cx=W/2, cy=H/2, R=Math.min(cx,cy)-50;
+  const pos={}; an.nodes.forEach((v,i)=>{ const a=-Math.PI/2+2*Math.PI*i/n; pos[v]=[cx+R*Math.cos(a), cy+R*Math.sin(a)]; });
+  const lines = an.edges.map(([a,b])=>{ const [x1,y1]=pos[a],[x2,y2]=pos[b]; const dx=x2-x1,dy=y2-y1,L=Math.hypot(dx,dy)||1; const s=34/L;
+    return `<line x1="${x1+dx*s}" y1="${y1+dy*s}" x2="${x2-dx*s}" y2="${y2-dy*s}" stroke="currentColor" stroke-opacity=".55" marker-end="url(#ar)"/>`; }).join('');
+  const nodes = an.nodes.map(v=>{ const [x,y]=pos[v]; const col = v===d.exposure?'var(--acc2)':v===d.outcome?'var(--ok)':(d.adjust||[]).includes(v)?'var(--warn)':'var(--muted)';
+    return `<g><rect x="${x-60}" y="${y-14}" width="120" height="28" rx="8" fill="var(--card)" stroke="${col}" stroke-width="2"/><text x="${x}" y="${y+5}" text-anchor="middle" font-size="12" fill="var(--ink)">${esc(v.length>18?v.slice(0,17)+'…':v)}</text></g>`; }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-height:420px;color:var(--ink)"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor" fill-opacity=".7"/></marker></defs>${lines}${nodes}</svg>`;
+}
+function renderDag(p){
+  const d=p.dag; const an=dagAnalysis(d);
+  const opts = v => `<option value=""></option>`+an.nodes.map(n=>`<option ${v===n?'selected':''}>${esc(n)}</option>`).join('');
+  return `<div style="margin:8px 0"><label for="dagEdges">Arestas, uma por linha (ex.: Declividade -> Supressão)</label>
+  <textarea id="dagEdges" rows="6" data-bind="dag.edges" data-rerender="1" placeholder="Declividade -> Supressão&#10;Declividade -> NDVI&#10;Supressão -> NDVI">${esc(d.edges)}</textarea>
+  <div class="row" style="margin-top:6px"><label>Exposição</label><select style="width:auto" data-bindc="dag.exposure">${opts(d.exposure)}</select>
+  <label>Desfecho</label><select style="width:auto" data-bindc="dag.outcome">${opts(d.outcome)}</select></div>
+  <div class="row small" style="margin-top:6px"><label>Ajustados:</label>${an.nodes.filter(n=>n!==d.exposure&&n!==d.outcome).map(n=>`<label style="font-weight:400"><input type="checkbox" data-act="dagAdj" data-n="${esc(n)}" ${(d.adjust||[]).includes(n)?'checked':''}> ${esc(n)}</label>`).join('')||'<span class="muted">—</span>'}</div>
+  ${dagSvg(d, an)}
+  ${an.warnings.map(w=>`<div class="pill warn">${esc(w)}</div>`).join(' ')}
+  ${d.exposure&&d.outcome?`<p class="small">Caminhos causais diretos: <b>${an.causal}</b>. Caminhos pela porta dos fundos: <b>${an.paths.length}</b>, abertos: <b>${an.paths.filter(x=>x.open).length}</b>.</p>
+  <table class="small">${an.paths.map(x=>`<tr><td>${esc(x.txt)}</td><td>${x.open?'<span class="pill bad">aberto</span>':'<span class="pill ok">bloqueado</span>'}</td><td class="muted">${esc(x.why)}</td></tr>`).join('')}</table>`:'<p class="small muted">Escolha exposição e desfecho para analisar os caminhos.</p>'}
+  <p class="small muted">A análise usa as regras de d-separação: não estima nada, só mostra quais caminhos de confusão continuam abertos com o conjunto ajustado.</p></div>`;
+}
+ACTIONS.dagAdj = el => { const p=cur(); const n=el.dataset.n; const a=new Set(p.dag.adjust||[]); a.has(n)?a.delete(n):a.add(n); p.dag.adjust=[...a]; touch(p); render(); };
+
+/* ---------- Rubrica (autoavaliação primeiro) ---------- */
+function lastCritique(p, stId){ return [...p.critiques].reverse().find(c=>c.stageId===stId && c.status==='done'); }
+function renderRubric(p, st){
+  const s=p.stages[st.id]; const lc=lastCritique(p, st.id);
+  return `<div class="card"><h2>Rubrica — sua autoavaliação</h2><p class="small muted">Pontue antes de ver o crítico. Portão: obrigatórios (borda azul) ≥ 4; demais ≥ 3.</p>
+  ${st.criteria.map(c=>{ const v=s.self[c.id]; const cv = lc?.result?.avaliacoes?.find(a=>a.criterio_id===c.id);
+    return `<div class="crit ${c.o?'obr':''}"><div>${esc(c.t)} ${c.o?'<span class="pill">obrigatório</span>':''}</div>
+    <div class="row" style="margin-top:4px"><div class="scores">${[0,1,2,3,4,5].map(n=>`<button title="${esc(SCALE[n])}" class="${v===n?'on':''}" data-act="self" data-c="${c.id}" data-n="${n}">${n}</button>`).join('')}</div>
+    <span class="small muted">${Number.isInteger(v)?esc(SCALE[v]):''}</span>
+    ${cv?`<span class="pill ${cv.nota>=4?'ok':cv.nota>=3?'warn':'bad'}">crítico: ${cv.nota}</span>`:''}</div></div>`; }).join('')}</div>`;
+}
+ACTIONS.self = el => { const p=cur(); const st=STAGES[S.stage]; p.stages[st.id].self[el.dataset.c]=Number(el.dataset.n); touch(p); render(); };
+
+/* ---------- Portão ---------- */
+function renderGate(p, st){
+  if (p.gates[st.id]) return '';
+  const issues = st.criteria.length || st.id!=='s0' ? gateCheck(p, st) : (stageTextLen(p,st)<st.min?[`Escreva pelo menos ${st.min} caracteres.`]:[]);
+  const lc=lastCritique(p, st.id); const disagree = lc ? st.criteria.filter(c=>c.o && (lc.result.avaliacoes.find(a=>a.criterio_id===c.id)?.nota ?? 5) < 4) : [];
+  return `<div class="card"><h2>Portão</h2>${issues.length?`<ul class="small">${issues.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:'<p><span class="pill ok">Condições atendidas pela sua autoavaliação</span></p>'}
+  ${disagree.length&&!issues.length?`<p class="small"><span class="pill warn">O crítico discorda</span> em ${disagree.length} critério(s) obrigatório(s). Você pode declarar o portão; a discordância fica no diário.</p>`:''}
+  <button class="b" data-act="declareGate" ${issues.length?'disabled':''}>Declarar portão cumprido</button>
+  <p class="small muted">Quem declara o portão é você; o crítico só registra discordância.</p></div>`;
+}
+ACTIONS.declareGate = () => {
+  const p=cur(); const st=STAGES[S.stage]; const lc=lastCritique(p, st.id);
+  const rounds = p.critiques.filter(c=>c.stageId===st.id && c.status==='done').length;
+  const disagree = lc ? st.criteria.filter(c=>c.o && (lc.result.avaliacoes.find(a=>a.criterio_id===c.id)?.nota ?? 5) < 4).map(c=>c.id) : [];
+  p.gates[st.id] = { at:nowISO(), rounds, time:p.stages[st.id].time||0, self:{...p.stages[st.id].self}, critic: lc? Object.fromEntries(lc.result.avaliacoes.map(a=>[a.criterio_id,a.nota])) : null, disagree };
+  logDiary(p, {stageId:st.id, stageName:st.name, kind:'portão', text:`Portão declarado após ${rounds} rodada(s) de crítica.${disagree.length?' Crítico discordou em: '+disagree.join(', '):''}`});
+  touch(p); toast('Portão registrado.'); if (S.stage < STAGES.length-1) S.stage++; render();
+};
+ACTIONS.reopen = () => { const p=cur(); const st=STAGES[S.stage]; if(!confirm('Reabrir este estágio? O registro do portão será removido.')) return;
+  delete p.gates[st.id]; logDiary(p,{stageId:st.id, stageName:st.name, kind:'reabertura', text:'Estágio reaberto.'}); touch(p); render(); };
+
+/* ---- llm.js ---- */
+/* ================= IA: cliente, crítico, fila ================= */
+const LLM = {
+  online:false, provider:null,
+  async ollamaUp(){ try{ const r=await fetch(S.config.ollamaBase.replace(/\/$/,'')+'/api/tags',{signal:AbortSignal.timeout(2500)}); return r.ok; }catch(e){ return false; } },
+  async checkStatus(){
+    const el=$('#llmStatus'); const up = await LLM.ollamaUp();
+    if (up){ LLM.online=true; LLM.provider='ollama'; el.className='pill ok'; el.textContent='IA: Qwen local'; }
+    else if (S.config.allowOpenRouter && S.config.openrouterKey){ LLM.online=true; LLM.provider='openrouter'; el.className='pill warn'; el.textContent='IA: OpenRouter'; }
+    else { LLM.online=false; LLM.provider=null; el.className='pill'; el.textContent='IA: offline (fila)'; }
+    return LLM.online;
+  },
+  stripThink(s){ return String(s||'').replace(/<think>[\s\S]*?<\/think>/g,'').trim(); },
+  parseJSON(s){ s=LLM.stripThink(s); try{ return JSON.parse(s); }catch(e){} const m=s.match(/\{[\s\S]*\}/); if(m){ try{ return JSON.parse(m[0]); }catch(e){} } throw new Error('Resposta da IA não é JSON válido'); },
+  async chat({system, user, schema, temperature}){
+    if (!LLM.online) await LLM.checkStatus();
+    if (!LLM.online) throw new Error('IA indisponível');
+    const temp = temperature ?? S.config.temperature;
+    if (LLM.provider==='ollama'){
+      const r = await fetch(S.config.ollamaBase.replace(/\/$/,'')+'/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:S.config.ollamaModel, stream:false, think:false, format:schema||'json', options:{temperature:temp, num_ctx:8192},
+          messages:[{role:'system',content:system},{role:'user',content:user}]})});
+      if (!r.ok) throw new Error('Ollama: HTTP '+r.status+' '+(await r.text()).slice(0,200));
+      const j = await r.json(); return LLM.parseJSON(j.message?.content);
+    } else {
+      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.config.openrouterKey,'X-Title':'Descartes'},
+        body:JSON.stringify({model:S.config.openrouterModel, temperature:temp, response_format:{type:'json_object'},
+          messages:[{role:'system',content:system+'\nResponda somente com JSON válido.'},{role:'user',content:user}]})});
+      if (!r.ok) throw new Error('OpenRouter: HTTP '+r.status+' '+(await r.text()).slice(0,200));
+      const j = await r.json(); return LLM.parseJSON(j.choices?.[0]?.message?.content);
+    }
+  },
+  /* Chamada com validação e até 2 novas tentativas */
+  async chatValid(opts, validate){
+    let lastErr;
+    for (let i=0;i<3;i++){ try{ const out=await LLM.chat(opts); const err=validate?validate(out):null; if(!err) return out; lastErr=new Error('Formato inválido: '+err); }catch(e){ lastErr=e; if(String(e.message).includes('indisponível')) throw e; } }
+    throw lastErr;
+  },
+  async embed(texts){
+    if (!(await LLM.ollamaUp())) throw new Error('Embeddings exigem o Ollama no PC');
+    const r = await fetch(S.config.ollamaBase.replace(/\/$/,'')+'/api/embed', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model:S.config.embedModel, input:texts})});
+    if (!r.ok) throw new Error('Ollama embed: HTTP '+r.status+' '+(await r.text()).slice(0,200));
+    return (await r.json()).embeddings;
+  },
+};
+
+/* ---------- Crítico ---------- */
+const HELP = {
+  1:'NÍVEL 1: no campo "ajuda" escreva string vazia. Ajude apenas com as perguntas socráticas em cada critério.',
+  2:'NÍVEL 2: no campo "ajuda" explique em até 120 palavras o conceito metodológico mais relevante para os critérios com nota baixa e o que estudar, SEM aplicá-lo ao tema do pesquisador e sem propor redação.',
+  3:'NÍVEL 3: no campo "ajuda" dê um exemplo resolvido, em até 150 palavras, de OUTRA área (por exemplo epidemiologia, economia, ecologia marinha, hidrologia de laboratório), nunca do tema do pesquisador, que mostre como o critério mais fraco é atendido.',
+};
+function criticSchema(st){
+  return { type:'object', required:['avaliacoes','caminho','estudar','ajuda'], properties:{
+    avaliacoes:{type:'array', items:{type:'object', required:['criterio_id','nota','trecho','pergunta','motivo'], properties:{
+      criterio_id:{type:'string', enum:st.criteria.map(c=>c.id)}, nota:{type:'integer', minimum:0, maximum:5}, trecho:{type:'string'}, pergunta:{type:'string'}, motivo:{type:'string'} }}},
+    caminho:{type:'object', required:['seguir','justificativa'], properties:{seguir:{type:'string', enum:['seguir','ajustar','abandonar']}, justificativa:{type:'string'}}},
+    estudar:{type:'array', items:{type:'object', required:['conceito','doi'], properties:{conceito:{type:'string'}, doi:{type:'string'}}}},
+    ajuda:{type:'string'} } };
+}
+function criticPrompt(p, st, level){
+  const sys = `Você é um revisor adversarial de periódico Q1 em sensoriamento remoto, geoprocessamento e ciências ambientais. Seu papel é encontrar o motivo de rejeição mais provável e fazer o pesquisador pensar.
+Escala de notas (inteiro 0-5): ${SCALE.map((s,i)=>i+'='+s).join('; ')}.
+Regras obrigatórias:
+- Avalie TODOS e SOMENTE os critérios listados, um item por critério, usando o id dado.
+- "trecho": cópia LITERAL de até 200 caracteres do texto do pesquisador que justifica a nota. Se o critério não aparece no texto, use "" e nota 0 ou 1.
+- "pergunta": uma pergunta socrática que leve o pesquisador a melhorar o critério.
+- "motivo": por que seguir, ajustar ou abandonar este caminho, em até 60 palavras.
+- PROIBIDO: reescrever o texto do pesquisador, propor a pergunta, a hipótese ou o contrafactual prontos, sugerir hipóteses no tema dele, elogiar sem citar trecho, inventar referências.
+- "estudar": até 4 conceitos para estudar. Preencha "doi" apenas se tiver certeza absoluta do DOI; caso contrário use "".
+- ${HELP[level]}
+- Escreva em português.`;
+  const prev = STAGES.filter(s=>p.gates[s.id] && s.id!==st.id).map(s=>`[${s.name} — aprovado]\n${stageText(p,s).slice(0,1500)}`).join('\n\n');
+  const user = `ESTÁGIO: ${st.name}\nDESCRIÇÃO: ${st.desc}\n\nCRITÉRIOS:\n${st.criteria.map(c=>`- ${c.id}${c.o?' (obrigatório)':''}: ${c.t}`).join('\n')}\n\n${prev?'CONTEXTO DOS ESTÁGIOS APROVADOS:\n'+prev+'\n\n':''}TEXTO DO PESQUISADOR NESTE ESTÁGIO:\n"""\n${stageText(p, st)}\n"""`;
+  return {sys, user};
+}
+function validateCritique(st){ return out => {
+  if (!Array.isArray(out.avaliacoes)) return 'sem avaliacoes';
+  const ids = new Set(out.avaliacoes.map(a=>a.criterio_id));
+  for (const c of st.criteria) if (!ids.has(c.id)) return 'faltou critério '+c.id;
+  for (const a of out.avaliacoes) if (!Number.isInteger(a.nota) || a.nota<0 || a.nota>5) return 'nota inválida';
+  return null; }; }
+
+function helpAvailability(p, st){
+  const s=p.stages[st.id]; const text=stageText(p, st); const h=hashStr(text);
+  const done = p.critiques.filter(c=>c.stageId===st.id && c.status==='done');
+  const last = done[done.length-1];
+  const revised = !last || last.textHash!==h;
+  const maxLevelUsed = Math.max(0, ...done.map(c=>c.level));
+  const base = [];
+  if (!selfComplete(p, st)) base.push('Faça a autoavaliação de todos os critérios primeiro.');
+  if (stageTextLen(p, st) < Math.min(st.min, 80)) base.push('Escreva mais antes de pedir crítica.');
+  if (pendingDecisions(p, st.id).length) base.push('Registre suas decisões sobre a crítica anterior.');
+  if (Queue.pendingFor(p, st.id)) base.push('Já há uma crítica na fila para este estágio.');
+  const lv = {1:[...base], 2:[...base], 3:[...base]};
+  if (last && !revised) [1,2,3].forEach(l=>lv[l].push('Revise o texto desde a última crítica.'));
+  if (maxLevelUsed < 1) lv[2].push('Disponível depois de uma crítica de nível 1 e uma revisão sua.');
+  if (maxLevelUsed < 2) lv[3].push('Disponível depois de uma crítica de nível 2 e uma revisão sua.');
+  return lv;
+}
+function pendingDecisions(p, stId){
+  const lc = lastCritique(p, stId); if (!lc) return [];
+  return lc.result.avaliacoes.filter(a=>a.nota<=3 && !lc.decisions?.[a.criterio_id]);
+}
+
+async function requestCritique(p, st, level){
+  const c = { id:uid('k'), stageId:st.id, level, at:nowISO(), textHash:hashStr(stageText(p, st)), selfSnapshot:{...p.stages[st.id].self}, status:'pending', decisions:{} };
+  p.critiques.push(c); touch(p);
+  if (!(await LLM.checkStatus())){ toast('IA indisponível: a crítica entrou na fila e roda quando o PC abrir o app.'); render(); return; }
+  await runCritique(p, c);
+}
+async function runCritique(p, c){
+  const st=stageById(c.stageId); c.textHash=hashStr(stageText(p, st)); S.busy['crit_'+c.id]=true; render();
+  try{
+    const {sys,user}=criticPrompt(p, st, c.level);
+    const out = await LLM.chatValid({system:sys, user, schema:criticSchema(st)}, validateCritique(st));
+    const src = stageText(p, st);
+    out.avaliacoes = st.criteria.map(cr => { const a = out.avaliacoes.find(x=>x.criterio_id===cr.id);
+      const ok = a.trecho ? quoteOK(a.trecho, src) : false;
+      return {...a, trechoOK:ok, semEvidencia: !!a.trecho && !ok}; });
+    out.estudar = (out.estudar||[]).slice(0,4).map(e=>({conceito:e.conceito, doi:(e.doi||'').replace(/^https?:\/\/(dx\.)?doi\.org\//,'').trim(), doiOK:null}));
+    c.result = out; c.status='done'; c.doneAt=nowISO(); c.provider=LLM.provider;
+    logDiary(p, {stageId:st.id, stageName:st.name, kind:`crítica N${c.level}`, text:`Recomendação: ${out.caminho?.seguir||'?'} — ${out.caminho?.justificativa||''}`});
+    verifyDois(p, c);
+  }catch(e){ c.status = String(e.message).includes('indisponível') ? 'pending' : 'error'; c.error=e.message; toast('Crítica: '+e.message, 6000); }
+  delete S.busy['crit_'+c.id]; touch(p); render();
+}
+async function verifyDois(p, c){
+  for (const e of c.result.estudar){ if(!e.doi){ e.doiOK=false; continue; }
+    try{ const r = await fetch('https://api.crossref.org/works/'+encodeURIComponent(e.doi)+(S.config.email?'?mailto='+encodeURIComponent(S.config.email):''));
+      if (r.ok){ const j=await r.json(); e.doiOK=true; e.ref=(j.message?.title?.[0]||'')+' ('+(j.message?.issued?.['date-parts']?.[0]?.[0]||'')+')'; } else e.doiOK=false; }
+    catch(err){ e.doiOK=false; } }
+  touch(p); if (S.view==='projeto') render();
+}
+
+/* ---------- Fila (pedidos feitos sem IA, ex.: no celular) ---------- */
+const Queue = {
+  pendingFor(p, stId){ return p.critiques.some(c=>c.stageId===stId && c.status==='pending'); },
+  async process(){
+    if (!LLM.online) return;
+    for (const p of S.projects) for (const c of p.critiques.filter(c=>c.status==='pending')){ await runCritique(p, c); }
+  },
+};
+
+/* ---------- Painel do crítico ---------- */
+function renderCritic(p, st){
+  const av = helpAvailability(p, st);
+  const all = p.critiques.filter(c=>c.stageId===st.id);
+  const lc = lastCritique(p, st.id); const pend = all.filter(c=>c.status==='pending'); const errs = all.filter(c=>c.status==='error').slice(-1);
+  const btn = l => `<button class="b ${l>1?'sec':''}" data-act="critique" data-l="${l}" ${av[l].length?'disabled':''} title="${esc(av[l].join(' '))}">Crítica N${l}</button>`;
+  let body='';
+  if (pend.length) body += `<p><span class="pill warn">${S.busy['crit_'+pend[0].id]?'Qwen avaliando…':'Na fila — roda quando a IA estiver disponível'}</span> ${!S.busy['crit_'+pend[0].id]&&LLM.online?'<button class="b sec" data-act="runQueue">Processar agora</button>':''}</p>`;
+  if (errs.length && !lc) body += `<p class="pill bad">Erro: ${esc(errs[0].error)}</p>`;
+  if (lc){ const r=lc.result;
+    body += `<h3>Crítica N${lc.level} — ${fmtDate(lc.doneAt)} <span class="pill ${r.caminho?.seguir==='seguir'?'ok':r.caminho?.seguir==='abandonar'?'bad':'warn'}">${esc(r.caminho?.seguir||'')}</span></h3>
+      <p>${esc(r.caminho?.justificativa||'')}</p>
+      ${r.avaliacoes.map(a=>{ const cr=st.criteria.find(c=>c.id===a.criterio_id); const need=a.nota<=3; const d=lc.decisions[a.criterio_id];
+        return `<div class="crit ${cr.o?'obr':''}"><div class="row"><b>${esc(cr.t)}</b><span class="pill ${a.nota>=4?'ok':a.nota>=3?'warn':'bad'}">nota ${a.nota}</span>
+          <span class="small muted">sua: ${lc.selfSnapshot[a.criterio_id]??'—'}</span></div>
+          ${a.trecho?`<div class="quote">“${esc(a.trecho)}” ${a.trechoOK?'<span class="pill ok">trecho verificado</span>':'<span class="pill bad">trecho não encontrado no seu texto — nota sem evidência</span>'}</div>`:'<div class="small muted">Sem trecho: o crítico não encontrou evidência no texto.</div>'}
+          <div><b>Pergunta:</b> ${esc(a.pergunta)}</div><div class="small"><b>Motivo:</b> ${esc(a.motivo)}</div>
+          ${need?(d?`<div class="small" style="margin-top:4px"><span class="pill ${d.decision==='aceita'?'ok':d.decision==='rejeitada'?'bad':'warn'}">${d.decision}</span> ${esc(d.justification)}</div>`:
+            `<div class="row" style="margin-top:6px"><select id="dec_${a.criterio_id}" style="width:auto"><option value="">decisão…</option><option>aceita</option><option>rejeitada</option><option>adiada</option></select>
+             <input type="text" id="just_${a.criterio_id}" placeholder="Justificativa (obrigatória)" style="flex:1;min-width:200px"><button class="b sec" data-act="decide" data-k="${lc.id}" data-c="${a.criterio_id}">Registrar</button></div>`):''}
+        </div>`; }).join('')}
+      ${r.ajuda?`<h3>Ajuda N${lc.level}</h3><div class="crit">${esc(r.ajuda)}</div>`:''}
+      ${r.estudar?.length?`<h3>O que estudar</h3><ul>${r.estudar.map(e=>`<li>${esc(e.conceito)} ${e.doi? (e.doiOK===null?'<span class="pill">verificando DOI…</span>': e.doiOK?`<a href="https://doi.org/${esc(e.doi)}" target="_blank" rel="noopener">${esc(e.ref||e.doi)}</a> <span class="pill ok">DOI verificado</span>`:'<span class="pill warn">DOI não confirmado: busque o conceito</span>') : '<span class="pill">conceito para buscar</span>'}</li>`).join('')}</ul>`:''}`;
+  }
+  return `<div class="card"><h2>Crítico</h2><p class="small muted">O crítico não recebe a sua autoavaliação. Ele não reescreve o seu texto: pergunta, aponta o critério e diz por que seguir ou não. Cada nível de ajuda só abre depois de uma revisão sua.</p>
+    <div class="row">${btn(1)}${btn(2)}${btn(3)}</div>
+    ${[1,2,3].some(l=>av[l].length)?`<p class="small muted">${esc([...new Set([...av[1],...av[2],...av[3]])].join(' '))}</p>`:''}
+    ${body}</div>`;
+}
+ACTIONS.critique = async el => { const p=cur(); const st=STAGES[S.stage]; const l=Number(el.dataset.l); if (helpAvailability(p,st)[l].length) return; p.stages[st.id].helpLevel=Math.max(p.stages[st.id].helpLevel||0,l); await requestCritique(p, st, l); };
+ACTIONS.runQueue = async () => { await LLM.checkStatus(); await Queue.process(); };
+ACTIONS.decide = el => {
+  const p=cur(); const k=p.critiques.find(c=>c.id===el.dataset.k); const cid=el.dataset.c; const st=stageById(k.stageId);
+  const dec=$('#dec_'+cid).value; const just=$('#just_'+cid).value.trim();
+  if (!dec) return toast('Escolha a decisão.'); if (just.length<10) return toast('Justifique em pelo menos 10 caracteres.');
+  k.decisions[cid]={decision:dec, justification:just, at:nowISO()};
+  const a=k.result.avaliacoes.find(x=>x.criterio_id===cid); const cr=st.criteria.find(c=>c.id===cid);
+  logDiary(p, {stageId:st.id, stageName:st.name, kind:'decisão sobre crítica', text:`${cr.t} (nota ${a.nota}): ${a.pergunta}`, decision:dec, justification:just});
+  touch(p); render();
+};
+
+/* ---- lit.js ---- */
+/* ================= Literatura em escala (6.1) e auditoria da lacuna (6.2) ================= */
+const LIT_TABS = [['fontes','Fontes e buscas'],['triagem','Triagem'],['extracao','Extração'],['validacao','Validação'],['sintese','Síntese'],['nucleo','Núcleo'],['lacuna','Lacuna']];
+const included = p => p.lit.records.filter(r => r.override ? r.override==='incluir' : (r.triage && r.triage.dec!=='excluir'));
+const recById = (p,id) => p.lit.records.find(r=>r.id===id);
+const normDoi = d => String(d||'').toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//,'').replace(/^doi:\s*/,'').trim();
+const normTitle = t => normTxt(t).replace(/[^a-z0-9à-ú]+/g,'');
+function gapDeclared(p){ const g=p.lit.gap; return !!g.declared && g.declaredHash===hashStr(g.claim||''); }
+
+/* ---------- Registro e deduplicação ---------- */
+function addRecords(p, recs, sourceName){
+  let novos=0; const idxDoi={}, idxT={};
+  for (const r of p.lit.records){ if(r.doi) idxDoi[r.doi]=r; idxT[normTitle(r.title)+'|'+(r.year||'')]=r; }
+  for (const raw of recs){
+    if (!raw.title) continue;
+    const r = {title:String(raw.title).trim(), abstract:String(raw.abstract||'').trim(), doi:normDoi(raw.doi), year:raw.year?Number(String(raw.year).slice(0,4))||null:null,
+      authors:raw.authors||'', venue:raw.venue||'', openalexId:raw.openalexId||'', s2Id:raw.s2Id||'', refs:raw.refs||[], citedBy:raw.citedBy||0, link:raw.link||''};
+    const ex = (r.doi && idxDoi[r.doi]) || idxT[normTitle(r.title)+'|'+(r.year||'')];
+    if (ex){ if(!ex.abstract && r.abstract){ ex.abstract=r.abstract; ex.sem_resumo=false; } if(!ex.openalexId && r.openalexId){ ex.openalexId=r.openalexId; ex.refs=r.refs; } if(!ex.s2Id && r.s2Id) ex.s2Id=r.s2Id;
+      ex.citedBy=Math.max(ex.citedBy||0, r.citedBy||0); if(!ex.sources.includes(sourceName)) ex.sources.push(sourceName); continue; }
+    const rec = {id:uid('r'), ...r, sources:[sourceName], sem_resumo:!r.abstract, addedAt:nowISO()};
+    p.lit.records.push(rec); novos++; if(rec.doi) idxDoi[rec.doi]=rec; idxT[normTitle(rec.title)+'|'+(rec.year||'')]=rec;
+  }
+  return novos;
+}
+function logSearch(p, s){ p.lit.searches.push({id:uid('s'), at:nowISO(), ...s}); logDiary(p,{stageId:'s1', stageName:'Literatura', kind:'busca', text:`${s.fonte} (${s.tipo}): "${s.consulta}" → ${s.n} resultados, ${s.novos} novos`}); touch(p); }
+
+/* ---------- OpenAlex ---------- */
+function oaAbstract(inv){ if(!inv) return ''; const arr=[]; for (const [w,pos] of Object.entries(inv)) for (const i of pos) arr[i]=w; return arr.filter(x=>x!==undefined).join(' '); }
+function oaMap(w){ return { title:w.title||w.display_name, abstract:oaAbstract(w.abstract_inverted_index), doi:w.doi, year:w.publication_year,
+  authors:(w.authorships||[]).slice(0,6).map(a=>a.author?.display_name).filter(Boolean).join('; '), venue:w.primary_location?.source?.display_name||'',
+  openalexId:(w.id||'').replace('https://openalex.org/',''), refs:(w.referenced_works||[]).map(x=>x.replace('https://openalex.org/','')), citedBy:w.cited_by_count||0 }; }
+function oaUrl(params){ const u=new URL('https://api.openalex.org/works'); for(const [k,v] of Object.entries(params)) u.searchParams.set(k,v);
+  u.searchParams.set('select','id,doi,title,display_name,publication_year,abstract_inverted_index,authorships,primary_location,referenced_works,cited_by_count');
+  if (S.config.openalexKey) u.searchParams.set('api_key', S.config.openalexKey); if (S.config.email) u.searchParams.set('mailto', S.config.email); return u.toString(); }
+async function oaGet(params){ const r=await fetch(oaUrl(params)); if(!r.ok) throw new Error('OpenAlex HTTP '+r.status+': '+(await r.text()).slice(0,160)); return r.json(); }
+ACTIONS.searchOA = async () => {
+  const p=cur(); const q=$('#oaQ').value.trim(); const max=Math.min(1000, Number($('#oaMax').value)||200); if(!q) return toast('Escreva a consulta.');
+  S.busy.search='OpenAlex…'; render(); const got=[];
+  try{ for (let page=1; got.length<max; page++){ const j=await oaGet({search:q, per_page:100, page}); got.push(...j.results.map(oaMap)); if (j.results.length<100) break; S.busy.search=`OpenAlex… ${got.length}`; render(); } }
+  catch(e){ toast(e.message, 7000); }
+  finally{ delete S.busy.search; }
+  const novos=addRecords(p, got.slice(0,max), 'OpenAlex'); logSearch(p,{fonte:'OpenAlex', consulta:q, tipo:'termos', n:Math.min(got.length,max), novos}); render();
+};
+/* ---------- Semantic Scholar ---------- */
+const S2F='paperId,title,abstract,year,externalIds,authors,venue,citationCount';
+const s2Map = d => ({title:d.title, abstract:d.abstract, doi:d.externalIds?.DOI, year:d.year, authors:(d.authors||[]).slice(0,6).map(a=>a.name).join('; '), venue:d.venue, citedBy:d.citationCount, s2Id:d.paperId});
+async function s2Fetch(url, opt={}){
+  for (let i=0;i<5;i++){ const r=await fetch(url,opt); if (r.status===429){ await new Promise(s=>setTimeout(s,2000*(i+1))); continue; }
+    if (!r.ok) throw new Error('Semantic Scholar HTTP '+r.status); return r.json(); }
+  throw new Error('Semantic Scholar ocupado (limite compartilhado). Tente de novo em alguns minutos.');
+}
+ACTIONS.searchS2 = async () => {
+  const p=cur(); const q=$('#s2Q').value.trim(); const max=Math.min(5000, Number($('#s2Max').value)||500); if(!q) return toast('Escreva a consulta.');
+  S.busy.search='Semantic Scholar…'; render(); const got=[]; let total=null;
+  try{ let token=null;
+    do { const u=`https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodeURIComponent(q)}&fields=${S2F}${token?'&token='+encodeURIComponent(token):''}`;
+      const j=await s2Fetch(u); total=j.total; got.push(...(j.data||[]).map(s2Map)); token=j.token; S.busy.search=`Semantic Scholar… ${got.length}`; render();
+      if (token) await new Promise(s=>setTimeout(s,1100)); } while (token && got.length<max); }
+  catch(e){ toast(e.message+' — se persistir, use a importação de arquivos.', 8000); }
+  finally{ delete S.busy.search; }
+  const kept=got.slice(0,max); const novos=addRecords(p, kept, 'Semantic Scholar');
+  logSearch(p,{fonte:'Semantic Scholar (bulk)', consulta:q, tipo:'termos', n:kept.length, novos, total});
+  if (total!=null && total>kept.length) toast(`A consulta tem ${total} resultados; trouxe ${kept.length}. Refine a consulta ou aumente o limite.`, 7000);
+  render();
+};
+
+/* ---------- Importação CSV / RIS / WoS ---------- */
+function parseCSV(text){
+  text=text.replace(/^\uFEFF/,''); const first=text.split(/\r?\n/,1)[0];
+  const sep = [',',';','\t'].map(s=>[s, first.split(s).length]).sort((a,b)=>b[1]-a[1])[0][0];
+  const rows=[]; let row=[], f='', q=false;
+  for (let i=0;i<text.length;i++){ const ch=text[i];
+    if (q){ if (ch==='"'){ if (text[i+1]==='"'){ f+='"'; i++; } else q=false; } else f+=ch; }
+    else if (ch==='"') q=true; else if (ch===sep){ row.push(f); f=''; } else if (ch==='\n'||ch==='\r'){ if(ch==='\r'&&text[i+1]==='\n') i++; row.push(f); rows.push(row); row=[]; f=''; } else f+=ch; }
+  if (f.length||row.length){ row.push(f); rows.push(row); }
+  return rows.filter(r=>r.some(c=>c.trim()));
+}
+function parseRIS(text){ const out=[]; let r=null;
+  for (const line of text.split(/\r?\n/)){ const m=line.match(/^([A-Z][A-Z0-9])  -\s?(.*)$/); if(!m){ continue; } const [,tag,val]=m;
+    if (tag==='TY'){ r={authors:[]}; continue; } if (!r) continue; if (tag==='ER'){ r.authors=r.authors.join('; '); out.push(r); r=null; continue; }
+    if ((tag==='TI'||tag==='T1') && !r.title) r.title=val; else if (tag==='AB'||tag==='N2') r.abstract=(r.abstract?r.abstract+' ':'')+val; else if (tag==='DO') r.doi=val;
+    else if ((tag==='PY'||tag==='Y1'||tag==='DA') && !r.year) r.year=val.slice(0,4); else if (tag==='AU'||tag==='A1') r.authors.push(val); else if ((tag==='JO'||tag==='T2'||tag==='JF') && !r.venue) r.venue=val; else if (tag==='UR' && !r.link) r.link=val; }
+  return out; }
+function mapTable(rows){
+  const H=rows[0].map(h=>h.trim().toLowerCase()); const find=(...names)=>H.findIndex(h=>names.includes(h));
+  const ix={title:find('title','article title','ti','document title'), abstract:find('abstract','ab'), doi:find('doi','di'), year:find('year','publication year','py'),
+    authors:find('authors','author full names','au','author names'), venue:find('journal','source title','so','source','publication title'), link:find('consensus link','link','url')};
+  let fonte='Importação', tipo='termos';
+  if (H.includes('takeaway')||H.includes('consensus link')){ fonte='Consensus'; tipo='exploratória'; }
+  else if (H.includes('eid')) fonte='Scopus'; else if (H.includes('ut')&&H.includes('pt')) fonte='Web of Science';
+  const recs = rows.slice(1).map(r=>{ const o={}; for (const [k,i] of Object.entries(ix)) if(i>=0) o[k]=(r[i]||'').trim(); return o; });
+  return {recs, fonte, tipo, dropped: H.includes('takeaway')?['Takeaway (gerada por IA)']:[]};
+}
+ACTIONS.importFile = async () => {
+  const p=cur(); const fi=$('#impFile'); const q=$('#impQ').value.trim(); const tipoSel=$('#impTipo').value;
+  if (!fi.files.length) return toast('Escolha o arquivo.'); if (!q) return toast('Informe a consulta ou pergunta usada na busca (vai para o registro).');
+  const text = await fi.files[0].text(); let parsed;
+  if (/^\s*TY  -/m.test(text)) parsed={recs:parseRIS(text), fonte:'RIS', tipo:'termos', dropped:[]};
+  else parsed=mapTable(parseCSV(text));
+  if (!parsed.recs.length) return toast('Nenhum registro reconhecido no arquivo.');
+  const tipo = parsed.fonte==='Consensus' ? 'exploratória' : tipoSel;
+  const novos=addRecords(p, parsed.recs, parsed.fonte);
+  logSearch(p,{fonte:parsed.fonte+' ('+fi.files[0].name+')', consulta:q, tipo, n:parsed.recs.length, novos});
+  toast(`${parsed.recs.length} registros lidos, ${novos} novos.${parsed.dropped.length?' Descartado: '+parsed.dropped.join(', '):''}`, 6000); render();
+};
+ACTIONS.addManual = () => {
+  const p=cur(); const t=$('#manT').value.trim(); if(!t) return toast('Informe o título.');
+  const novos=addRecords(p,[{title:t, link:$('#manL').value.trim(), abstract:''}],'Manual');
+  const r=p.lit.records[p.lit.records.length-1]; if(novos){ r.cinzenta=true; r.nota=$('#manN').value.trim(); r.triage={dec:'duvida', motivo:'literatura cinzenta: leitura obrigatória', by:'regra'}; }
+  logSearch(p,{fonte:'Manual', consulta:t, tipo:'manual', n:1, novos}); render();
+};
+
+/* ---------- Execução em lote ---------- */
+async function runBatch(key, items, fn){
+  if (S.busy[key]) return; const b = S.busy[key] = {done:0, total:items.length, stop:false, errors:0}; render(); let last=0;
+  for (const it of items){ if (b.stop) break; try{ await fn(it); }catch(e){ b.errors++; console.warn(e); if(String(e.message).includes('indisponível')){ toast('IA indisponível — lote interrompido.'); break; } }
+    b.done++; touch(); if (Date.now()-last>1000){ last=Date.now(); if (S.view==='literatura') render(); } }
+  delete S.busy[key]; touch(); render(); toast(`Lote concluído: ${b.done}/${b.total}${b.errors?`, ${b.errors} erro(s)`:''}.`);
+}
+const progress = key => { const b=S.busy[key]; if(!b) return ''; return `<div class="row" style="margin:6px 0"><div class="progress" style="flex:1"><div style="width:${(100*b.done/Math.max(1,b.total)).toFixed(1)}%"></div></div><span class="small">${b.done}/${b.total}</span><button class="b sec" data-act="stopBatch" data-k="${key}">Parar</button></div>`; };
+ACTIONS.stopBatch = el => { if (S.busy[el.dataset.k]) S.busy[el.dataset.k].stop=true; };
+
+/* ---------- Triagem ---------- */
+const triageSchema = {type:'object', required:['decisao','trecho','motivo'], properties:{decisao:{type:'string',enum:['incluir','excluir','duvida']}, trecho:{type:'string'}, motivo:{type:'string'}}};
+async function triageOne(p, r){
+  const src = r.title+'\n'+(r.abstract||'');
+  const out = await LLM.chatValid({system:`Você faz triagem de literatura científica para um pesquisador. Aplique SOMENTE os critérios dele. "trecho": cópia literal de até 160 caracteres do título ou resumo que justifica a decisão. Na dúvida, use "duvida". Responda em português.`,
+    user:`CRITÉRIOS DE INCLUSÃO E EXCLUSÃO:\n${p.lit.criteria}\n\nTÍTULO: ${r.title}\nRESUMO: ${r.abstract||'(sem resumo)'}`, schema:triageSchema},
+    o=>['incluir','excluir','duvida'].includes(o.decisao)?null:'decisao');
+  const ok = quoteOK(out.trecho, src); let dec=out.decisao;
+  if (dec==='excluir' && !ok) dec='duvida';
+  r.triage={dec, trecho:out.trecho, motivo:out.motivo, ok, by:'ia', critHash:hashStr(p.lit.criteria)};
+}
+ACTIONS.runTriage = () => { const p=cur(); if (p.lit.criteria.trim().length<30) return toast('Escreva os critérios de inclusão e exclusão primeiro.');
+  const h=hashStr(p.lit.criteria); const todo=p.lit.records.filter(r=>!r.override && (!r.triage || (r.triage.by==='ia' && r.triage.critHash!==h)));
+  if(!todo.length) return toast('Nada pendente de triagem.'); runBatch('triage', todo, r=>triageOne(p,r)); };
+ACTIONS.override = (el) => { const p=cur(); const r=recById(p, el.dataset.r); r.override = el.value || undefined; touch(p); render(); };
+
+/* ---------- Extração ---------- */
+const schemaHash = p => hashStr(JSON.stringify(p.lit.schema.map(f=>[f.id,f.nome,f.desc,f.tipo])));
+async function extractOne(p, r){
+  const props={}; for (const f of p.lit.schema) props[f.id]={type:'object', required:['valor','trecho'], properties:{valor:{type:'string'}, trecho:{type:'string'}}};
+  const schema={type:'object', required:['campos'], properties:{campos:{type:'object', required:p.lit.schema.map(f=>f.id), properties:props}}};
+  const src=r.title+'\n'+(r.abstract||'');
+  const out = await LLM.chatValid({system:`Você extrai dados de artigos científicos para uma tabela. Use SOMENTE o título e o resumo fornecidos. Para cada campo: "valor" curto (para campos categóricos, um rótulo de poucas palavras); "trecho" = cópia literal de até 160 caracteres que sustenta o valor. Se a informação não estiver no texto, valor "não informado" e trecho "". Nunca deduza além do texto.`,
+    user:`CAMPOS:\n${p.lit.schema.map(f=>`- ${f.id} (${f.tipo}): ${f.nome}${f.desc?' — '+f.desc:''}`).join('\n')}\n\nTÍTULO: ${r.title}\nRESUMO: ${r.abstract||'(sem resumo)'}`, schema},
+    o=>o.campos && p.lit.schema.every(f=>o.campos[f.id])?null:'campos');
+  const ex={};
+  for (const f of p.lit.schema){ const c=out.campos[f.id]; const ni = !c.valor || /^n[aã]o informado$/i.test(c.valor.trim());
+    const ok = !ni && quoteOK(c.trecho, src);
+    ex[f.id] = ok ? {valor:c.valor.trim(), trecho:c.trecho, ok:true} : {valor:'não informado', trecho:'', ok:false, descartado: ni?null:c.valor}; }
+  r.extract={schemaHash:schemaHash(p), campos:ex};
+}
+ACTIONS.addField = () => { const p=cur(); if (p.lit.validation.locked && !confirm('Alterar o esquema invalida a validação já feita. Continuar?')) return; resetValidation(p);
+  p.lit.schema.push({id:'f'+(p.lit.schema.length+1)+'_'+Math.random().toString(36).slice(2,5), nome:'', desc:'', tipo:'categorico'}); touch(p); render(); };
+ACTIONS.delField = el => { const p=cur(); if (p.lit.validation.locked && !confirm('Alterar o esquema invalida a validação já feita. Continuar?')) return; resetValidation(p); p.lit.schema.splice(Number(el.dataset.i),1); touch(p); render(); };
+function resetValidation(p){ p.lit.validation={threshold:p.lit.validation.threshold, locked:false, sample:[], manual:{}, equiv:{}, done:false}; }
+ACTIONS.runExtract = () => { const p=cur(); if(!p.lit.schema.length || p.lit.schema.some(f=>!f.nome.trim())) return toast('Defina os campos (com nome) primeiro.');
+  const h=schemaHash(p); const todo=included(p).filter(r=>!r.extract || r.extract.schemaHash!==h); if(!todo.length) return toast('Nada pendente de extração.');
+  runBatch('extract', todo, r=>extractOne(p,r)); };
+
+/* ---------- Validação (codificação cega + kappa) ---------- */
+const normVal = v => { const s=normTxt(v||''); return (!s || /^n[aã]o informado$/.test(s)) ? 'não informado' : s; };
+function cohenKappa(a, b){ const n=a.length; if(!n) return null; let agree=0; const ca={}, cb={};
+  for (let i=0;i<n;i++){ if(a[i]===b[i]) agree++; ca[a[i]]=(ca[a[i]]||0)+1; cb[b[i]]=(cb[b[i]]||0)+1; }
+  const po=agree/n; let pe=0; for (const l of new Set([...a,...b])) pe+=((ca[l]||0)/n)*((cb[l]||0)/n);
+  return pe>=1 ? (po===1?1:0) : (po-pe)/(1-pe); }
+function validationResults(p){
+  const v=p.lit.validation; const res={};
+  for (const f of p.lit.schema){ const A=[],B=[]; let pendingEquiv=0;
+    for (const rid of v.sample){ const r=recById(p,rid); if(!r?.extract) continue; const m=v.manual[rid]?.[f.id]; if(m===undefined) continue;
+      let ia=normVal(r.extract.campos[f.id]?.valor), eu=normVal(m);
+      if (ia!==eu){ const k=rid+'|'+f.id; if (v.equiv[k]===true) eu=ia; else if (v.equiv[k]===undefined && f.tipo==='texto') pendingEquiv++; }
+      A.push(ia); B.push(eu); }
+    const n=A.length; const agree=n?A.filter((x,i)=>x===B[i]).length/n:null; const kappa=f.tipo==='categorico'?cohenKappa(A,B):null;
+    const metric = f.tipo==='categorico' ? kappa : agree; res[f.id]={n, agree, kappa, pendingEquiv, pass: metric!==null && metric>=v.threshold && pendingEquiv===0}; }
+  return res;
+}
+const usableFields = p => { const v=p.lit.validation; if(!v.done) return p.lit.schema; const res=validationResults(p); return p.lit.schema.filter(f=>res[f.id]?.pass); };
+ACTIONS.drawSample = () => { const p=cur(); const pool=included(p).filter(r=>r.extract && r.extract.schemaHash===schemaHash(p)); if (pool.length<5) return toast('Extraia os dados primeiro (mínimo de 5 artigos).');
+  const arr=[...pool]; for (let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; }
+  const v=p.lit.validation; v.sample=arr.slice(0,30).map(r=>r.id); v.locked=true; v.manual={}; v.equiv={}; v.done=false; v.lockedAt=nowISO();
+  logDiary(p,{stageId:'s1', stageName:'Literatura', kind:'validação', text:`Amostra de ${v.sample.length} artigos sorteada; limiar fixado em ${v.threshold}.`}); touch(p); render(); };
+ACTIONS.equiv = el => { const p=cur(); p.lit.validation.equiv[el.dataset.k] = el.dataset.v==='1'; touch(p); render(); };
+ACTIONS.finishValidation = () => { const p=cur(); const v=p.lit.validation; const res=validationResults(p);
+  const coded = v.sample.filter(id=>p.lit.schema.every(f=>v.manual[id]?.[f.id]!==undefined)).length;
+  if (coded < v.sample.length) return toast(`Faltam ${v.sample.length-coded} artigos para codificar.`);
+  if (Object.values(res).some(r=>r.pendingEquiv)) return toast('Julgue as equivalências pendentes dos campos de texto.');
+  v.done=true; v.doneAt=nowISO(); logDiary(p,{stageId:'s1', stageName:'Literatura', kind:'validação', text:'Validação concluída: '+p.lit.schema.map(f=>`${f.nome} ${res[f.id].pass?'aprovado':'reprovado'}`).join('; ')}); touch(p); render(); };
+
+/* ---------- Embeddings, grupos e núcleo ---------- */
+async function getEmb(p){ return (await DB.get('kv','emb:'+p.id)) || {model:'', vecs:{}}; }
+function unit(v){ let n=0; for (const x of v) n+=x*x; n=Math.sqrt(n)||1; return Float32Array.from(v, x=>x/n); }
+const dot=(a,b)=>{ let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; };
+ACTIONS.embedAll = async () => {
+  const p=cur(); const E=await getEmb(p); if (E.model!==S.config.embedModel){ E.model=S.config.embedModel; E.vecs={}; }
+  const todo=included(p).filter(r=>!E.vecs[r.id]); if(!todo.length) return toast('Embeddings já calculados.');
+  const batches=[]; for (let i=0;i<todo.length;i+=16) batches.push(todo.slice(i,i+16));
+  await runBatch('embed', batches, async b=>{ const vs=await LLM.embed(b.map(r=>(r.title+'. '+(r.abstract||'')).slice(0,2000))); b.forEach((r,i)=>E.vecs[r.id]=unit(vs[i])); });
+  await DB.put('kv', E, 'emb:'+p.id); render();
+};
+function seededRand(seed){ let s=seed>>>0; return ()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+function kmeans(ids, vecs, k){
+  const rand=seededRand(42); const X=ids.map(id=>vecs[id]); const cents=[X[Math.floor(rand()*X.length)]];
+  while (cents.length<k){ const d=X.map(x=>Math.max(0,1-Math.max(...cents.map(c=>dot(x,c))))); const tot=d.reduce((a,b)=>a+b,0)||1; let t=rand()*tot, i=0; for(;i<d.length-1;i++){ t-=d[i]; if(t<=0) break; } cents.push(X[i]); }
+  let assign=new Array(X.length).fill(0);
+  for (let it=0; it<30; it++){ let ch=0; X.forEach((x,i)=>{ let best=0,bs=-2; cents.forEach((c,j)=>{ const s=dot(x,c); if(s>bs){bs=s;best=j;} }); if(assign[i]!==best){assign[i]=best;ch++;} });
+    for (let j=0;j<k;j++){ const mem=X.filter((_,i)=>assign[i]===j); if(!mem.length) continue; const m=new Float32Array(mem[0].length); mem.forEach(v=>v.forEach((x,d)=>m[d]+=x)); cents[j]=unit(m); }
+    if(!ch && it) break; }
+  return {assign:Object.fromEntries(ids.map((id,i)=>[id,assign[i]])), cents};
+}
+const STOP=new Set('a an the of in on for and or to with by from as at is are was were be using use based study analysis via its their this that these than into between over under new approach data de da do das dos e em para com por uma um os as no na nos nas ao à se que entre sobre'.split(' '));
+function clusterLabels(p, assign, k){
+  const docs={}; const df={}; const recs=included(p).filter(r=>assign[r.id]!==undefined);
+  for (const r of recs){ const toks=[...new Set(normTxt(r.title).split(/[^a-zà-ú0-9-]+/).filter(t=>t.length>3&&!STOP.has(t)))]; docs[r.id]=toks; toks.forEach(t=>df[t]=(df[t]||0)+1); }
+  const labels=[]; for (let j=0;j<k;j++){ const tf={}; let n=0; recs.filter(r=>assign[r.id]===j).forEach(r=>{ n++; docs[r.id].forEach(t=>tf[t]=(tf[t]||0)+1); });
+    const sc=Object.entries(tf).map(([t,c])=>[t,(c/Math.max(1,n))*Math.log(recs.length/(df[t]))]).sort((a,b)=>b[1]-a[1]).slice(0,5).map(x=>x[0]); labels.push(sc.join(', ')); }
+  return labels;
+}
+ACTIONS.cluster = async () => { const p=cur(); const E=await getEmb(p); const ids=included(p).map(r=>r.id).filter(id=>E.vecs[id]);
+  if (ids.length<10) return toast('Calcule os embeddings primeiro (mínimo de 10 artigos).'); const k=Math.max(2,Math.min(20,Number(p.lit.k)||6));
+  const {assign,cents}=kmeans(ids,E.vecs,k); p.lit.clusters={k, assign, labels:clusterLabels(p,assign,k), summaries:{}, at:nowISO()}; E.cents=cents; await DB.put('kv',E,'emb:'+p.id); touch(p); render(); };
+ACTIONS.summarizeCluster = async el => {
+  const p=cur(); const j=Number(el.dataset.j); const E=await getEmb(p); const C=p.lit.clusters; const mem=included(p).filter(r=>C.assign[r.id]===j);
+  const cen=E.cents?.[j]; const top = cen ? [...mem].sort((a,b)=>dot(E.vecs[b.id],cen)-dot(E.vecs[a.id],cen)).slice(0,25) : mem.slice(0,25);
+  const code=new Map(top.map((r,i)=>['A'+(i+1), r.id]));
+  S.busy['sum_'+j]=true; render();
+  try{
+    const out=await LLM.chatValid({system:'Você resume um grupo de artigos científicos. Escreva de 3 a 6 frases objetivas sobre o que o grupo estuda, com que dados e métodos e quais limitações aparecem. Cada frase deve citar em "ids" os códigos (A1, A2…) dos artigos que a sustentam; não afirme nada que os resumos não digam. Não avalie lacunas. Português.',
+      user:[...code.entries()].map(([c,id])=>{ const r=recById(p,id); return `${c}: ${r.title} (${r.year||'s.d.'}). ${(r.abstract||'(sem resumo)').slice(0,600)}`; }).join('\n\n'),
+      schema:{type:'object',required:['frases'],properties:{frases:{type:'array',items:{type:'object',required:['texto','ids'],properties:{texto:{type:'string'},ids:{type:'array',items:{type:'string'}}}}}}}},
+      o=>Array.isArray(o.frases)?null:'frases');
+    C.summaries[j]=out.frases.map(f=>({texto:f.texto, ids:(f.ids||[]).filter(c=>code.has(c)).map(c=>code.get(c))})).filter(f=>f.ids.length);
+  }catch(e){ toast(e.message,6000); }
+  delete S.busy['sum_'+j]; touch(p); render();
+};
+async function coreRanking(p){
+  const inc=included(p); const cites={};
+  const need=inc.filter(r=>r.s2Id && !r.s2refs);
+  for (let i=0;i<need.length;i+=400){ const ch=need.slice(i,i+400);
+    try{ const j=await s2Fetch('https://api.semanticscholar.org/graph/v1/paper/batch?fields=references.paperId',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids:ch.map(r=>r.s2Id)})});
+      j.forEach((x,k)=>{ ch[k].s2refs=(x?.references||[]).map(y=>y.paperId).filter(Boolean); }); }catch(e){ toast('Rede de citações: '+e.message, 6000); break; } }
+  const key = r => r.s2Id || r.openalexId; const ids=new Set(inc.map(key).filter(Boolean));
+  for (const r of inc) for (const ref of [...(r.s2refs||[]), ...(r.refs||[])]) if (ids.has(ref)) cites[ref]=(cites[ref]||0)+1;
+  const E=await getEmb(p); let qv=null;
+  const qtext = (p.stages.s2.fields.pergunta||'')+' '+(p.lit.gap.claim||'')+' '+(p.stages.s1.fields.tensao||'');
+  if (Object.keys(E.vecs).length && qtext.trim().length>20){ try{ qv=unit((await LLM.embed([qtext]))[0]); }catch(e){} }
+  const rows=inc.map(r=>({r, c:(cites[r.s2Id]||0)+(cites[r.openalexId]||0), g:r.citedBy||0, s: qv&&E.vecs[r.id]?dot(qv,E.vecs[r.id]):null}));
+  const pct=(arr,key)=>{ const v=arr.map(x=>x[key]??-1); const sorted=[...v].sort((a,b)=>a-b); return x=>sorted.filter(y=>y<(x[key]??-1)).length/Math.max(1,sorted.length-1); };
+  const pc=pct(rows,'c'), pg=pct(rows,'g'), ps=pct(rows,'s');
+  rows.forEach(x=>x.score = qv ? 0.4*pc(x)+0.1*pg(x)+0.5*ps(x) : 0.8*pc(x)+0.2*pg(x));
+  return {rows:rows.sort((a,b)=>b.score-a.score).slice(0,30), usedSim:!!qv};
+}
+ACTIONS.computeCore = async () => { const p=cur(); const {rows,usedSim}=await coreRanking(p); p.lit.core=rows.map(x=>({id:x.r.id, c:x.c, s:x.s, score:x.score})); p.lit.coreSim=usedSim; touch(p); render(); };
+ACTIONS.expandCitations = async () => {
+  const p=cur(); const seeds=p.lit.core.slice(0,10).map(c=>recById(p,c.id)).filter(r=>r?.s2Id||r?.openalexId); if(!seeds.length) return toast('O núcleo precisa de artigos vindos do Semantic Scholar.');
+  S.busy.search='Seguindo citações…'; render(); const got=[];
+  try{ for (const s of seeds){
+      if (s.s2Id){ for (const [rel,key] of [['references','citedPaper'],['citations','citingPaper']]){
+          const j=await s2Fetch(`https://api.semanticscholar.org/graph/v1/paper/${s.s2Id}/${rel}?limit=100&fields=${S2F}`); got.push(...(j.data||[]).map(x=>x[key]).filter(x=>x?.title).map(s2Map));
+          await new Promise(r=>setTimeout(r,1100)); } }
+      else if (s.openalexId && S.config.openalexKey){ const j=await oaGet({filter:'cites:'+s.openalexId, per_page:50}); got.push(...j.results.map(oaMap)); } } }
+  catch(e){ toast(e.message,7000); } finally{ delete S.busy.search; }
+  const novos=addRecords(p, got, 'Citações'); logSearch(p,{fonte:'Semantic Scholar (citações)', consulta:'referências e citantes de '+seeds.length+' artigos do núcleo', tipo:'cadeia', n:got.length, novos});
+  toast(`${novos} novos registros: eles precisam passar pela triagem.`); render();
+};
+
+/* ---------- Lacuna ---------- */
+const gapSchema={type:'object',required:['classe','trecho','motivo'],properties:{classe:{type:'string',enum:['ja_responde','em_parte','nao_responde']},trecho:{type:'string'},motivo:{type:'string'}}};
+async function gapOne(p, r){
+  const src=r.title+'\n'+(r.abstract||'');
+  const out=await LLM.chatValid({system:'Você verifica se um artigo já responde à lacuna de pesquisa afirmada por um pesquisador. Use SOMENTE o título e o resumo. "ja_responde": o estudo responde a lacuna; "em_parte": responde parte ou em outro contexto; "nao_responde": não trata dela. "trecho": cópia literal de até 160 caracteres que justifica. Português.',
+    user:`LACUNA AFIRMADA:\n${p.lit.gap.claim}\n\nTÍTULO: ${r.title}\nRESUMO: ${r.abstract||'(sem resumo)'}`, schema:gapSchema}, o=>['ja_responde','em_parte','nao_responde'].includes(o.classe)?null:'classe');
+  r.gap={classe:out.classe, trecho:out.trecho, motivo:out.motivo, ok:quoteOK(out.trecho,src), claimHash:hashStr(p.lit.gap.claim)};
+}
+ACTIONS.runGap = () => { const p=cur(); if((p.lit.gap.claim||'').trim().length<30) return toast('Escreva a afirmação de lacuna (uma frase completa).');
+  const h=hashStr(p.lit.gap.claim); const todo=included(p).filter(r=>!r.gap||r.gap.claimHash!==h); if(!todo.length) return toast('Corpus já classificado para esta afirmação.');
+  runBatch('gap', todo, r=>gapOne(p,r)); };
+function readingList(p){ const h=hashStr(p.lit.gap.claim||''); return included(p).filter(r=>r.sem_resumo || r.cinzenta || (r.gap && r.gap.claimHash===h && (r.gap.classe!=='nao_responde' || !r.gap.ok))); }
+ACTIONS.gapDecide = el => { const p=cur(); const v=el.value; if(v) p.lit.gap.decisions[el.dataset.r]={v, at:nowISO(), claimHash:hashStr(p.lit.gap.claim)}; else delete p.lit.gap.decisions[el.dataset.r]; touch(p); render(); };
+function gapConditions(p){
+  const g=p.lit.gap, h=hashStr(g.claim||''), c=[];
+  if ((g.claim||'').trim().length<30) c.push('Escreva a afirmação de lacuna.');
+  if (!p.lit.searches.some(s=>s.tipo==='termos')) c.push('Falta ao menos uma busca reproduzível por termos (Semantic Scholar, Scopus, Web of Science ou OpenAlex).');
+  const inc=included(p); if (!inc.length) c.push('Nenhum artigo incluído na triagem.');
+  const notCls=inc.filter(r=>!r.gap||r.gap.claimHash!==h).length; if (notCls) c.push(`${notCls} artigo(s) incluídos ainda não classificados contra a lacuna.`);
+  const rl=readingList(p); const und=rl.filter(r=>g.decisions[r.id]?.claimHash!==h).length; if (und) c.push(`${und} artigo(s) da lista de leitura sem decisão.`);
+  if (rl.some(r=>g.decisions[r.id]?.claimHash===h && g.decisions[r.id].v==='refuta')) c.push('Há artigo que refuta a lacuna: reformule a afirmação.');
+  return c;
+}
+ACTIONS.declareGap = () => { const p=cur(); const c=gapConditions(p); if(c.length) return toast(c[0]); const j=$('#gapJust').value.trim(); if(j.length<20) return toast('Justifique a declaração (mínimo de 20 caracteres).');
+  const g=p.lit.gap; g.declared=true; g.declaredHash=hashStr(g.claim); g.justification=j; g.declaredAt=nowISO();
+  logDiary(p,{stageId:'s1', stageName:'1. Fenômeno e anomalia', kind:'lacuna', text:`Lacuna não refutada por busca registrada: "${g.claim}"`, justification:j}); touch(p); render(); };
+ACTIONS.suggestTerms = async () => { const p=cur(); if(!p.lit.searches.length) return toast('Faça sua primeira busca antes (ajuda de nível 2).');
+  S.busy.terms=true; render();
+  try{ const out=await LLM.chatValid({system:'Você ajuda a revisar estratégias de busca bibliográfica em sensoriamento remoto e ciências ambientais. Sugira termos, sinônimos e variações em inglês e português que estão AUSENTES das consultas já feitas e que poderiam trazer estudos relevantes. Não sugira conclusões sobre a lacuna. Português.',
+      user:`AFIRMAÇÃO OU TEMA:\n${p.lit.gap.claim||p.stages.s2.fields.pergunta||p.title}\n\nCONSULTAS JÁ FEITAS:\n${p.lit.searches.map(s=>'- '+s.consulta).join('\n')}`,
+      schema:{type:'object',required:['termos'],properties:{termos:{type:'array',items:{type:'object',required:['termo','por_que'],properties:{termo:{type:'string'},por_que:{type:'string'}}}}}}}, o=>Array.isArray(o.termos)?null:'termos');
+    p.lit.termSuggestions={at:nowISO(), termos:out.termos.slice(0,15)}; logDiary(p,{stageId:'s1',stageName:'Literatura',kind:'ajuda N2',text:'Sugestão de termos: '+out.termos.map(t=>t.termo).join(', ')}); }
+  catch(e){ toast(e.message,6000); } delete S.busy.terms; touch(p); render(); };
+
+/* ---------- Renderização ---------- */
+function recLine(r, extra=''){ return `<div class="rec"><div class="t">${esc(r.title)}</div><div class="small muted">${esc(r.authors?.split(';')[0]||'')}${r.authors?.includes(';')?' et al.':''} · ${r.year||'s.d.'} · ${esc(r.venue||'')} ${r.doi?`· <a href="https://doi.org/${esc(r.doi)}" target="_blank" rel="noopener">${esc(r.doi)}</a>`:r.link?`· <a href="${esc(r.link)}" target="_blank" rel="noopener">link</a>`:''} · ${esc(r.sources.join(', '))} ${r.sem_resumo?'<span class="pill warn">sem resumo</span>':''}</div>${extra}</div>`; }
+function renderLit(p){
+  const tab=S.litTab; const L=p.lit;
+  const tabs=`<div class="tabs">${LIT_TABS.map(([k,l])=>`<button class="${tab===k?'on':''}" data-act="litTab" data-t="${k}">${l}</button>`).join('')}</div>`;
+  const head=`<div class="card"><h2>Literatura — ${esc(p.title)}</h2><p class="small muted">A IA lê e extrai; o código agrega; você define o que extrair e interpreta. ${LLM.online?'':'<b>IA offline:</b> buscas e importações funcionam; triagem, extração e grupos exigem o Qwen.'}</p>
+    <div><span class="kpi"><b>${L.records.length}</b><span class="small muted">registros</span></span><span class="kpi"><b>${L.records.filter(r=>r.triage||r.override).length}</b><span class="small muted">triados</span></span><span class="kpi"><b>${included(p).length}</b><span class="small muted">incluídos</span></span><span class="kpi"><b>${L.records.filter(r=>r.extract).length}</b><span class="small muted">extraídos</span></span><span class="kpi"><b>${gapDeclared(p)?'sim':'não'}</b><span class="small muted">lacuna declarada</span></span></div></div>`;
+  let body='';
+  if (tab==='fontes') body=litFontes(p); else if (tab==='triagem') body=litTriagem(p); else if (tab==='extracao') body=litExtracao(p);
+  else if (tab==='validacao') body=litValidacao(p); else if (tab==='sintese') body=litSintese(p); else if (tab==='nucleo') body=litNucleo(p); else body=litLacuna(p);
+  return head+tabs+body;
+}
+ACTIONS.litTab = el => { S.litTab=el.dataset.t; render(); };
+function litFontes(p){
+  const L=p.lit; const bySrc={}; L.records.forEach(r=>r.sources.forEach(s=>bySrc[s]=(bySrc[s]||0)+1));
+  const filt=(S.litFilter||'').trim(); const list=L.records.filter(r=>!filt||normTxt(r.title).includes(normTxt(filt))).slice(0,60);
+  return `<div class="card"><h2>Buscar</h2>${S.busy.search?`<p><span class="pill warn">${esc(S.busy.search)}</span></p>`:''}
+    <h3>Semantic Scholar <span class="pill ok">sem chave</span></h3>
+    <div class="row"><input type="text" id="s2Q" placeholder='ex.: "vegetation permanence" + ("remote sensing" | satellite) -ocean' style="flex:1;min-width:240px"><input type="number" id="s2Max" value="500" style="width:90px" title="máximo de registros"><button class="b" data-act="searchS2" ${S.busy.search?'disabled':''}>Buscar</button></div>
+    <p class="small muted">Busca reproduzível no título e no resumo: "frase exata", + (e), | (ou), - (excluir), parênteses. Até 1.000 registros por página.</p>
+    <details><summary class="small">OpenAlex (opcional, exige chave gratuita)</summary>
+    <div class="row" style="margin-top:6px"><input type="text" id="oaQ" placeholder="consulta" style="flex:1;min-width:240px"><input type="number" id="oaMax" value="200" style="width:90px"><button class="b sec" data-act="searchOA" ${S.busy.search||!S.config.openalexKey?'disabled':''}>Buscar</button></div></details>
+    <h3>Importar arquivo (Scopus, Web of Science, Consensus, RIS)</h3>
+    <div class="row"><input type="file" id="impFile" accept=".csv,.ris,.txt,.tsv"><select id="impTipo" style="width:auto"><option value="termos">busca por termos</option><option value="exploratória">busca exploratória</option></select></div>
+    <div class="row" style="margin-top:6px"><input type="text" id="impQ" placeholder="Consulta ou pergunta usada (obrigatório, vai para o registro)" style="flex:1;min-width:240px"><button class="b" data-act="importFile">Importar</button></div>
+    <p class="small muted">Consensus entra como busca exploratória; a coluna Takeaway (gerada por IA) é descartada.</p>
+    <h3>Literatura cinzenta (normas, notas técnicas, teses)</h3>
+    <div class="row"><input type="text" id="manT" placeholder="Título" style="flex:1;min-width:200px"><input type="url" id="manL" placeholder="Link" style="flex:1;min-width:160px"><input type="text" id="manN" placeholder="Nota" style="flex:1;min-width:120px"><button class="b sec" data-act="addManual">Adicionar</button></div>
+    <h3>Termos ausentes (ajuda N2)</h3><button class="b sec" data-act="suggestTerms" ${!L.searches.length||S.busy.terms||!LLM.online?'disabled':''}>${S.busy.terms?'Pensando…':'Sugerir termos ausentes'}</button>
+    ${L.termSuggestions?`<ul class="small">${L.termSuggestions.termos.map(t=>`<li><b>${esc(t.termo)}</b> — ${esc(t.por_que)}</li>`).join('')}</ul>`:''}</div>
+  <div class="card"><h2>Registro de buscas</h2><table><tr><th>Data</th><th>Fonte</th><th>Tipo</th><th>Consulta</th><th>Resultados</th><th>Novos</th></tr>
+    ${[...L.searches].reverse().map(s=>`<tr><td class="small">${fmtDate(s.at)}</td><td>${esc(s.fonte)}</td><td><span class="pill ${s.tipo==='termos'?'ok':''}">${esc(s.tipo)}</span></td><td>${esc(s.consulta)}</td><td>${s.n}</td><td>${s.novos}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Nenhuma busca ainda.</td></tr>'}</table>
+    <p class="small muted">Por fonte: ${Object.entries(bySrc).map(([k,v])=>`${esc(k)} ${v}`).join(' · ')||'—'} · sem resumo: ${L.records.filter(r=>r.sem_resumo).length}</p></div>
+  <div class="card"><h2>Registros</h2><input type="text" placeholder="Filtrar por título" value="${esc(S.litFilter||'')}" data-act-input="litFilter" id="litFilter">
+    ${list.map(r=>recLine(r)).join('')}${L.records.length>60?`<p class="small muted">Mostrando 60 de ${L.records.length}.</p>`:''}</div>`;
+}
+document.addEventListener('input', ev=>{ if (ev.target.id==='litFilter'){ S.litFilter=ev.target.value; debounceRender(); } });
+function litTriagem(p){
+  const L=p.lit; const c={incluir:0,excluir:0,duvida:0}; L.records.forEach(r=>{ const d=r.override||r.triage?.dec; if(d) c[d==='incluir'?'incluir':d==='excluir'?'excluir':'duvida']++; });
+  const pend=L.records.filter(r=>!r.triage&&!r.override).length;
+  const show=S.triFilter||'duvida'; const list=L.records.filter(r=>(r.override||r.triage?.dec)===show).slice(0,80);
+  return `<div class="card"><h2>Critérios de inclusão e exclusão (você escreve)</h2>
+    <textarea id="litCrit" rows="6" data-bind="lit.criteria" placeholder="Incluir: …&#10;Excluir: …">${esc(L.criteria)}</textarea>
+    <div class="row" style="margin-top:6px"><button class="b" data-act="runTriage" ${S.busy.triage||!LLM.online?'disabled':''}>Triar pendentes (${pend})</button><span class="small muted">Mudou os critérios? A triagem da IA é refeita; suas decisões manuais ficam.</span></div>${progress('triage')}
+    <p>Incluir <b>${c.incluir}</b> · Dúvida <b>${c.duvida}</b> · Excluir <b>${c.excluir}</b> · Pendentes <b>${pend}</b></p>
+    <p class="small muted">Dúvida conta como incluído. Exclusão sem trecho verificado vira dúvida.</p></div>
+  <div class="card"><div class="tabs">${['duvida','incluir','excluir'].map(k=>`<button class="${show===k?'on':''}" data-act="triFilter" data-k="${k}">${k}</button>`).join('')}</div>
+    ${list.map(r=>recLine(r, `<div class="small">${r.triage?`${r.triage.trecho?`<span class="quote">“${esc(r.triage.trecho)}”</span> ${r.triage.ok?'<span class="pill ok">verificado</span>':'<span class="pill bad">não verificado</span>'}`:''} ${esc(r.triage.motivo||'')}`:''}
+      <select data-chg="override" data-r="${r.id}" style="width:auto;margin-left:6px"><option value="">${r.override?'voltar à IA':'sua decisão…'}</option><option value="incluir" ${r.override==='incluir'?'selected':''}>incluir</option><option value="excluir" ${r.override==='excluir'?'selected':''}>excluir</option></select></div>`)).join('')||'<p class="muted">Nada aqui.</p>'}</div>`;
+}
+ACTIONS.triFilter = el => { S.triFilter=el.dataset.k; render(); };
+function litExtracao(p){
+  const L=p.lit; const h=schemaHash(p); const inc=included(p); const done=inc.filter(r=>r.extract?.schemaHash===h);
+  const fs=L.schema;
+  return `<div class="card"><h2>Esquema de extração (você define)</h2><p class="small muted">Esta é a decisão intelectual: o que extrair dá forma ao mapa. Categórico = rótulo curto comparável (validado por kappa); texto = valor livre (validado por concordância).</p>
+    ${fs.map((f,i)=>`<div class="row" style="margin:4px 0"><input type="text" id="fn_${i}" placeholder="Nome do campo" data-bind="lit.schema.${i}.nome" value="${esc(f.nome)}" style="flex:1;min-width:140px"><input type="text" id="fd_${i}" placeholder="Descrição para a IA" data-bind="lit.schema.${i}.desc" value="${esc(f.desc)}" style="flex:2;min-width:200px">
+      <select data-bindc="lit.schema.${i}.tipo" style="width:auto"><option value="categorico" ${f.tipo==='categorico'?'selected':''}>categórico</option><option value="texto" ${f.tipo==='texto'?'selected':''}>texto</option></select><button class="b sec" data-act="delField" data-i="${i}">×</button></div>`).join('')}
+    <button class="b sec" data-act="addField">+ campo</button>
+    <div class="row" style="margin-top:10px"><button class="b" data-act="runExtract" ${S.busy.extract||!LLM.online?'disabled':''}>Extrair (${inc.length-done.length} pendentes)</button></div>${progress('extract')}</div>
+  <div class="card" style="overflow-x:auto"><h2>Tabela extraída (${done.length})</h2><p class="small muted">Cada valor tem trecho literal conferido no resumo; sem trecho verificado = "não informado".</p>
+    <table class="small"><tr><th>Artigo</th>${fs.map(f=>`<th>${esc(f.nome)}</th>`).join('')}</tr>
+    ${done.slice(0,100).map(r=>`<tr><td>${esc(r.title.slice(0,70))}${r.title.length>70?'…':''} (${r.year||''})</td>${fs.map(f=>{const c=r.extract.campos[f.id]; return `<td title="${esc(c?.trecho||'')}">${c?.ok?esc(c.valor):'<span class="muted">não informado</span>'}</td>`;}).join('')}</tr>`).join('')}</table></div>`;
+}
+function litValidacao(p){
+  const v=p.lit.validation; const fs=p.lit.schema; const res=validationResults(p);
+  if (!v.locked) return `<div class="card"><h2>Validação por amostra</h2><p>Antes de sortear, fixe o limiar. Ele não pode mudar depois.</p>
+    <div class="row"><label>Limiar (kappa para categóricos; concordância para texto)</label><input type="number" step="0.05" min="0" max="1" id="valThr" data-bind="lit.validation.threshold" value="${v.threshold}" style="width:90px"></div>
+    <p class="small muted">Referência usual: kappa ≥ 0,6 (concordância substancial, Landis e Koch 1977).</p><button class="b" data-act="drawSample">Sortear amostra de 30</button></div>`;
+  const idx = Math.min(S.valIdx||0, v.sample.length-1); const r=recById(p, v.sample[idx]); const allCoded=v.sample.every(id=>fs.every(f=>v.manual[id]?.[f.id]!==undefined));
+  const coding = !v.done && !allCoded;
+  let html=`<div class="card"><h2>Validação — limiar ${v.threshold} (fixado em ${fmtDate(v.lockedAt)})</h2>`;
+  if (coding){ const seenVals={}; fs.forEach(f=>{ seenVals[f.id]=[...new Set(included(p).map(x=>x.extract?.campos?.[f.id]?.valor).filter(Boolean))].slice(0,40); });
+    html+=`<p class="small muted">Codificação cega: você não vê o valor da IA. Deixe "não informado" se o resumo não traz a informação.</p>
+    <p><b>Artigo ${idx+1} de ${v.sample.length}</b></p><div class="crit"><div class="t"><b>${esc(r.title)}</b></div><p class="small">${esc(r.abstract||'(sem resumo)')}</p></div>
+    ${fs.map(f=>`<div class="col" style="margin:6px 0"><label>${esc(f.nome)} <span class="muted">(${f.tipo})</span></label><input type="text" list="dl_${f.id}" id="man_${idx}_${f.id}" data-bind="lit.validation.manual.${r.id}.${f.id}" value="${esc(v.manual[r.id]?.[f.id]??'')}" placeholder="não informado"><datalist id="dl_${f.id}">${seenVals[f.id].map(x=>`<option value="${esc(x)}">`).join('')}</datalist></div>`).join('')}
+    <div class="row"><button class="b sec" data-act="valNav" data-d="-1" ${idx===0?'disabled':''}>Anterior</button><button class="b" data-act="valNav" data-d="1">${idx===v.sample.length-1?'Concluir codificação':'Próximo'}</button>
+    <span class="small muted">${v.sample.filter(id=>fs.every(f=>v.manual[id]?.[f.id]!==undefined)).length} de ${v.sample.length} codificados</span></div>`;
+  } else {
+    const pendingPairs=[]; for (const id of v.sample){ const rr=recById(p,id); for (const f of fs){ if (f.tipo!=='texto') continue; const ia=normVal(rr.extract?.campos?.[f.id]?.valor), eu=normVal(v.manual[id]?.[f.id]); if (ia!==eu) pendingPairs.push({rr,f,ia,eu,k:id+'|'+f.id}); } }
+    html+=`<table><tr><th>Campo</th><th>Tipo</th><th>n</th><th>Concordância</th><th>Kappa</th><th>Situação</th></tr>${fs.map(f=>{const x=res[f.id]; return `<tr><td>${esc(f.nome)}</td><td>${f.tipo}</td><td>${x.n}</td><td>${x.agree==null?'—':(100*x.agree).toFixed(0)+'%'}</td><td>${x.kappa==null?'—':x.kappa.toFixed(2)}</td><td>${x.pendingEquiv?'<span class="pill warn">julgar equivalências</span>':x.pass?'<span class="pill ok">aprovado</span>':'<span class="pill bad">fora da síntese</span>'}</td></tr>`;}).join('')}</table>
+    ${pendingPairs.length?`<h3>Equivalências nos campos de texto</h3><p class="small muted">Os valores diferem na escrita. Diga se significam a mesma coisa.</p>${pendingPairs.map(x=>`<div class="crit small"><b>${esc(x.f.nome)}</b> — ${esc(x.rr.title.slice(0,80))}<br>IA: <b>${esc(x.ia)}</b> · Você: <b>${esc(x.eu)}</b>
+      <span class="row"><button class="b ${p.lit.validation.equiv[x.k]===true?'':'sec'}" data-act="equiv" data-k="${x.k}" data-v="1">equivalentes</button><button class="b ${p.lit.validation.equiv[x.k]===false?'danger':'sec'}" data-act="equiv" data-k="${x.k}" data-v="0">diferentes</button></span></div>`).join('')}`:''}
+    ${v.done?`<p><span class="pill ok">Validação concluída em ${fmtDate(v.doneAt)}</span> Só os campos aprovados entram na síntese.</p>`:`<button class="b" data-act="finishValidation">Concluir validação</button> <button class="b sec" data-act="valNav" data-d="0">Revisar codificação</button>`}`;
+  }
+  return html+`</div>`;
+}
+ACTIONS.valNav = el => { const p=cur(); const v=p.lit.validation; const d=Number(el.dataset.d); if (d===0){ S.valIdx=0; v.reviewing=true; }
+  const fs=p.lit.schema; const idx=S.valIdx||0; const id=v.sample[idx];
+  if (d===1){ for (const f of fs){ if (v.manual[id]?.[f.id]===undefined){ (v.manual[id] ||= {})[f.id]=''; } } }
+  S.valIdx=Math.max(0,Math.min(v.sample.length-1, idx+d)); touch(p); render(); };
+function litSintese(p){
+  const L=p.lit; const v=L.validation; const fs=usableFields(p); const inc=included(p).filter(r=>r.extract?.schemaHash===schemaHash(p));
+  const warn = !v.done ? '<p><span class="pill warn">Campos ainda não validados — use com cautela; após a validação, só os aprovados aparecem.</span></p>' : '';
+  const fa=fs.find(f=>f.id===S.mapA)||fs[0], fb=fs.find(f=>f.id===S.mapB)||fs[1]||fs[0];
+  let map='';
+  if (fa&&fb&&inc.length){ const val=(r,f)=>r.extract.campos[f.id]?.ok?normVal(r.extract.campos[f.id].valor):'não informado';
+    const top=f=>{ const c={}; inc.forEach(r=>{const x=val(r,f); c[x]=(c[x]||0)+1;}); return Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,12).map(x=>x[0]); };
+    const A=top(fa), B=top(fb); const cell=(a,b)=>inc.filter(r=>val(r,fa)===a&&val(r,fb)===b).length;
+    map=`<div style="overflow-x:auto"><table class="mx small"><tr><th>${esc(fa.nome)} \\ ${esc(fb.nome)}</th>${B.map(b=>`<th>${esc(b)}</th>`).join('')}</tr>${A.map(a=>`<tr><th>${esc(a)}</th>${B.map(b=>{const n=cell(a,b); return `<td class="${n?'':'cell0'}">${n}</td>`;}).join('')}</tr>`).join('')}</table></div>
+    <p class="small muted">Células vazias (destacadas) são candidatas a lacuna — sujeitas ao viés da busca e ao que os resumos relatam. Confirme na aba Lacuna.</p>`; }
+  const years={}; inc.forEach(r=>{ if(r.year) years[r.year]=(years[r.year]||0)+1; }); const yk=Object.keys(years).map(Number); const ys=yk.length?Array.from({length:Math.max(...yk)-Math.min(...yk)+1},(_,i)=>Math.min(...yk)+i):[];
+  const maxY=Math.max(1,...Object.values(years));
+  const ysvg = ys.length? `<svg viewBox="0 0 640 160" style="width:100%;max-height:200px"><g>${ys.map((y,i)=>{ const w=600/ys.length; const h=120*(years[y]||0)/maxY; return `<rect x="${20+i*w}" y="${130-h}" width="${Math.max(1,w-2)}" height="${h}" fill="var(--acc2)" opacity=".8"><title>${y}: ${years[y]||0}</title></rect>${ys.length<=25||i%5===0?`<text x="${20+i*w+w/2}" y="148" font-size="10" text-anchor="middle" fill="var(--muted)">${y}</text>`:''}`; }).join('')}</g></svg>`:'';
+  const C=L.clusters;
+  const clusters = C ? Array.from({length:C.k},(_,j)=>{ const mem=included(p).filter(r=>C.assign[r.id]===j); const sm=C.summaries?.[j];
+    return `<div class="crit"><div class="row"><b>Grupo ${j+1}</b><span class="pill">${mem.length} artigos</span><span class="small muted">${esc(C.labels[j])}</span><button class="b sec" data-act="summarizeCluster" data-j="${j}" ${S.busy['sum_'+j]||!LLM.online?'disabled':''}>${S.busy['sum_'+j]?'Resumindo…':'Resumir (Qwen)'}</button></div>
+      ${sm?`<ul class="small">${sm.map(f=>`<li>${esc(f.texto)} <span class="muted">[${f.ids.map(id=>{const r=recById(p,id); return esc((r?.authors||'').split(/[;,]/)[0].split(' ').pop()+' '+(r?.year||''));}).join('; ')}]</span></li>`).join('')}</ul>`:''}
+      <details><summary class="small">Artigos</summary>${mem.slice(0,40).map(r=>recLine(r)).join('')}</details></div>`; }).join('') : '';
+  return `<div class="card"><h2>Mapa de evidências</h2>${warn}
+    ${fs.length?`<div class="row"><label>Linhas</label><select style="width:auto" data-chg="mapSel" data-w="A">${fs.map(f=>`<option value="${f.id}" ${fa?.id===f.id?'selected':''}>${esc(f.nome)}</option>`).join('')}</select><label>Colunas</label><select style="width:auto" data-chg="mapSel" data-w="B">${fs.map(f=>`<option value="${f.id}" ${fb?.id===f.id?'selected':''}>${esc(f.nome)}</option>`).join('')}</select></div>${map}`:'<p class="muted">Defina e extraia campos primeiro.</p>'}</div>
+  <div class="card"><h2>Artigos incluídos por ano</h2>${ysvg||'<p class="muted">Sem dados.</p>'}</div>
+  <div class="card"><h2>Grupos temáticos</h2><p class="small muted">Embeddings calculados no seu PC (${esc(S.config.embedModel)}); agrupamento k-means com semente fixa. Cada frase do resumo cita os artigos que a sustentam.</p>
+    <div class="row"><button class="b sec" data-act="embedAll" ${S.busy.embed?'disabled':''}>Calcular embeddings</button><label>k</label><input type="number" id="litK" min="2" max="20" data-bind="lit.k" value="${L.k}" style="width:70px"><button class="b" data-act="cluster">Agrupar</button></div>${progress('embed')}
+    ${clusters}</div>`;
+}
+ACTIONS.mapSel = el => { if (el.dataset.w==='A') S.mapA=el.value; else S.mapB=el.value; render(); };
+function litNucleo(p){
+  const L=p.lit; const rows=(L.core||[]).map(c=>({c, r:recById(p,c.id)})).filter(x=>x.r);
+  return `<div class="card"><h2>Núcleo de leitura</h2><p class="small muted">Ranking: citações dentro do corpus (rede do Semantic Scholar)${L.coreSim?' + proximidade com a sua pergunta e a lacuna (embeddings)':''} + citações globais. Leia estes na íntegra — é a parte sem atalho.</p>
+    <div class="row"><button class="b" data-act="computeCore">Calcular núcleo</button><button class="b sec" data-act="expandCitations" ${!rows.length||S.busy.search?'disabled':''}>Seguir citações dos 10 primeiros</button></div>
+    ${S.busy.search?`<p><span class="pill warn">${esc(S.busy.search)}</span></p>`:''}
+    ${rows.map(({c,r},i)=>recLine(r, `<div class="row small"><span class="pill">#${i+1}</span><span>citado por ${c.c} no corpus</span>${c.s!=null?`<span>similaridade ${c.s.toFixed(2)}</span>`:''}
+      <label style="font-weight:400"><input type="checkbox" data-bindc="lit.coreNotes.${r.id}.lido" ${L.coreNotes?.[r.id]?.lido?'checked':''}> lido</label></div>
+      <input type="text" id="cn_${r.id}" placeholder="Sua nota de leitura" data-bind="lit.coreNotes.${r.id}.nota" value="${esc(L.coreNotes?.[r.id]?.nota||'')}">`)).join('')}</div>`;
+}
+function litLacuna(p){
+  const g=p.lit.gap; const h=hashStr(g.claim||''); const rl=readingList(p); const cond=gapConditions(p); const inc=included(p);
+  const cls={ja_responde:0,em_parte:0,nao_responde:0}; inc.forEach(r=>{ if(r.gap?.claimHash===h) cls[r.gap.classe]++; });
+  return `<div class="card"><h2>Auditoria da lacuna</h2><p class="small muted">O portão exige lacuna <b>não refutada por busca registrada</b> — não "comprovada". Não encontrar um estudo não prova que ele não existe.</p>
+    <label for="gapClaim">Afirmação de lacuna (uma frase, sua)</label><textarea id="gapClaim" rows="3" data-bind="lit.gap.claim">${esc(g.claim||'')}</textarea>
+    ${g.declared&&!gapDeclared(p)?'<p><span class="pill warn">A afirmação mudou depois da declaração: refaça a auditoria.</span></p>':''}
+    <div class="row" style="margin-top:6px"><button class="b" data-act="runGap" ${S.busy.gap||!LLM.online?'disabled':''}>Classificar incluídos contra a lacuna</button></div>${progress('gap')}
+    <p>Já responde <b>${cls.ja_responde}</b> · Em parte <b>${cls.em_parte}</b> · Não responde <b>${cls.nao_responde}</b> · de ${inc.length} incluídos</p></div>
+  <div class="card"><h2>Lista de leitura obrigatória (${rl.length})</h2><p class="small muted">Inclui: "já responde", "em parte", classificações sem trecho verificado, registros sem resumo e literatura cinzenta.</p>
+    ${rl.map(r=>recLine(r, `<div class="small">${r.gap?`<span class="pill ${r.gap.classe==='ja_responde'?'bad':r.gap.classe==='em_parte'?'warn':''}">${r.gap.classe.replace('_',' ')}</span> ${r.gap.trecho?`<span class="quote">“${esc(r.gap.trecho)}”</span>`:''} ${r.gap.ok?'':'<span class="pill bad">trecho não verificado</span>'} ${esc(r.gap.motivo||'')}`:''}
+      <select data-chg="gapDecide" data-r="${r.id}" style="width:auto;margin-left:6px"><option value="">sua decisão após ler…</option><option value="nao_refuta" ${g.decisions[r.id]?.claimHash===h&&g.decisions[r.id].v==='nao_refuta'?'selected':''}>não refuta</option><option value="refuta" ${g.decisions[r.id]?.claimHash===h&&g.decisions[r.id].v==='refuta'?'selected':''}>refuta a lacuna</option></select></div>`)).join('')||'<p class="muted">Vazia.</p>'}</div>
+  <div class="card"><h2>Declaração</h2>${gapDeclared(p)?`<p><span class="pill ok">Lacuna não refutada — declarada em ${fmtDate(g.declaredAt)}</span></p><p class="small">${esc(g.justification)}</p>`:
+    `${cond.length?`<ul class="small">${cond.map(c=>`<li>${esc(c)}</li>`).join('')}</ul>`:''}<textarea id="gapJust" rows="3" placeholder="Justificativa: bases, limites da busca, o que pode ter ficado de fora"></textarea>
+    <button class="b" data-act="declareGap" ${cond.length?'disabled':''}>Declarar lacuna não refutada</button>`}</div>`;
+}
+
+/* ---- extras.js ---- */
+/* ================= Métricas, configurações, exportação, sincronização ================= */
+function critiqueCalib(c){ const d=[]; for (const a of c.result.avaliacoes){ const s=c.selfSnapshot[a.criterio_id]; if (Number.isInteger(s)) d.push(Math.abs(s-a.nota)); } return d.length? d.reduce((x,y)=>x+y,0)/d.length : null; }
+function renderMetrics(){
+  const all=S.projects; const done=all.flatMap(p=>p.critiques.filter(c=>c.status==='done').map(c=>({p,c,cal:critiqueCalib(c)}))).sort((a,b)=>a.c.doneAt<b.c.doneAt?-1:1);
+  const cals=done.map(x=>x.cal).filter(x=>x!=null); const avg=a=>a.length?(a.reduce((x,y)=>x+y,0)/a.length):null;
+  const first=avg(cals.slice(0,3)), last=avg(cals.slice(-3));
+  const gates=all.flatMap(p=>Object.entries(p.gates).map(([sid,g])=>({p,st:stageById(sid),g})));
+  const lv={1:0,2:0,3:0}; done.forEach(x=>lv[x.c.level]++);
+  const dec=all.flatMap(p=>p.critiques.flatMap(c=>Object.values(c.decisions||{}))); const rej=dec.filter(d=>d.decision==='rejeitada').length;
+  const zero={}; for (const p of all){ for (const st of STAGES){ const lc=lastCritique(p,st.id); if(!lc) continue; for (const a of lc.result.avaliacoes) if (a.nota<=1){ (zero[a.criterio_id] ||= new Set()).add(p.id); } } }
+  const recurrent=Object.entries(zero).filter(([,s])=>s.size>1).map(([cid,s])=>{ const st=STAGES.find(x=>x.criteria.some(c=>c.id===cid)); return {t:st.criteria.find(c=>c.id===cid).t, st:st.name, n:s.size}; });
+  const f=x=>x==null?'—':x.toFixed(2);
+  return `<div class="card"><h2>Métricas de evolução</h2><p class="small muted">Medem a sua habilidade, não a ajuda da IA. A nota do crítico não é verdade de referência; a validação externa vem dos pareceres reais dos periódicos.</p>
+    <span class="kpi"><b>${f(avg(cals))}</b><span class="small muted">calibração média |sua − crítico|</span></span>
+    <span class="kpi"><b>${f(first)} → ${f(last)}</b><span class="small muted">3 primeiras → 3 últimas críticas</span></span>
+    <span class="kpi"><b>${gates.length?avg(gates.map(x=>x.g.rounds)).toFixed(1):'—'}</b><span class="small muted">rodadas por portão</span></span>
+    <span class="kpi"><b>${lv[1]} / ${lv[2]} / ${lv[3]}</b><span class="small muted">ajuda N1 / N2 / N3</span></span>
+    <span class="kpi"><b>${dec.length?Math.round(100*rej/dec.length)+'%':'—'}</b><span class="small muted">críticas rejeitadas com justificativa</span></span></div>
+  <div class="card"><h2>Calibração por crítica</h2><table><tr><th>Data</th><th>Projeto</th><th>Estágio</th><th>Nível</th><th>|sua − crítico|</th></tr>${done.map(x=>`<tr><td class="small">${fmtDate(x.c.doneAt)}</td><td>${esc(x.p.title)}</td><td>${esc(stageById(x.c.stageId).name)}</td><td>N${x.c.level}</td><td>${f(x.cal)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">Sem críticas ainda.</td></tr>'}</table></div>
+  <div class="card"><h2>Portões</h2><table><tr><th>Projeto</th><th>Estágio</th><th>Rodadas</th><th>Tempo ativo</th><th>Discordância do crítico</th><th>Data</th></tr>${gates.map(x=>`<tr><td>${esc(x.p.title)}</td><td>${esc(x.st.name)}</td><td>${x.g.rounds}</td><td>${Math.round((x.g.time||0)/60)} min</td><td>${x.g.disagree?.length||0}</td><td class="small">${fmtDate(x.g.at)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Nenhum portão ainda.</td></tr>'}</table></div>
+  <div class="card"><h2>Erros recorrentes</h2><p class="small muted">Critérios com nota 0 ou 1 do crítico em mais de um projeto.</p>${recurrent.length?`<ul>${recurrent.map(r=>`<li>${esc(r.st)} — ${esc(r.t)} (${r.n} projetos)</li>`).join('')}</ul>`:'<p class="muted">Nenhum até agora.</p>'}</div>`;
+}
+
+/* ---------- Configurações ---------- */
+function renderConfig(){
+  const c=S.config; const inp=(k,label,type='text',ph='')=>`<div class="col" style="margin:6px 0"><label>${label}</label><input type="${type}" data-cfg="${k}" value="${esc(c[k]??'')}" placeholder="${esc(ph)}"></div>`;
+  return `<div class="card"><h2>IA local (Ollama)</h2>
+    ${inp('ollamaBase','Endereço do Ollama','url')}${inp('ollamaModel','Modelo do crítico','text','qwen3:14b')}${inp('embedModel','Modelo de embeddings','text','qwen3-embedding:0.6b')}
+    <div class="row"><button class="b sec" data-act="testLLM">Testar conexão</button><span class="small muted">No PC, o Ollama precisa liberar a origem deste site em OLLAMA_ORIGINS (veja o LEIAME).</span></div></div>
+  <div class="card"><h2>Reserva no celular (OpenRouter)</h2>
+    <label style="font-weight:400"><input type="checkbox" data-cfg="allowOpenRouter" ${c.allowOpenRouter?'checked':''}> Permitir OpenRouter quando o Ollama não estiver acessível</label>
+    <p class="small"><span class="pill warn">Privacidade</span> As ideias passam por terceiros. Na conta do OpenRouter, bloqueie provedores que treinam com prompts. Limite gratuito: 50 pedidos por dia.</p>
+    ${inp('openrouterKey','Chave do OpenRouter (fica só neste aparelho)','password')}${inp('openrouterModel','Modelo','text')}</div>
+  <div class="card"><h2>Bases bibliográficas</h2><p class="small muted">O Semantic Scholar e o Crossref funcionam sem chave. O OpenAlex é opcional.</p>${inp('email','E-mail para o Crossref (opcional, identifica as consultas)','text')}<details><summary class="small">OpenAlex (opcional)</summary>${inp('openalexKey','Chave gratuita do OpenAlex','password')}</details></div>
+  <div class="card"><h2>Sincronização (Google Drive)</h2><p class="small muted">Os projetos ficam na pasta oculta do aplicativo no seu Drive. As chaves de API não são sincronizadas. Em conflito, vence a versão mais recente de cada projeto.</p>
+    ${inp('googleClientId','ID do cliente OAuth do Google (o mesmo tipo usado no LabResearch)','text')}<div class="row"><button class="b" data-act="driveConnect">Conectar e sincronizar</button><span class="small">${esc(Sync.status)}</span></div></div>
+  <div class="card"><h2>Backup</h2><div class="row"><button class="b sec" data-act="exportBackup">Exportar backup (JSON)</button><input type="file" id="bkFile" accept=".json"><button class="b sec" data-act="importBackup">Importar backup</button></div>
+    ${cur()?`<div class="row" style="margin-top:10px"><button class="b danger" data-act="deleteProject">Excluir projeto atual</button></div>`:''}<p class="small muted">Descartes v${VERSION}</p></div>`;
+}
+ACTIONS.testLLM = async () => { const ok=await LLM.checkStatus(); if(!ok) return toast('Sem IA: verifique se o Ollama está rodando e se OLLAMA_ORIGINS inclui este site.', 7000);
+  try{ const out=await LLM.chat({system:'Responda em JSON.', user:'Responda {"ok": true}', schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok']}}); toast(out.ok?`Conexão OK (${LLM.provider}).`:'Resposta inesperada.'); }catch(e){ toast(e.message, 7000); } };
+
+/* ---------- Exportação ---------- */
+function download(name, text, type='application/json'){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+ACTIONS.exportBackup = () => { const cfg={...S.config}; delete cfg.openrouterKey; delete cfg.openalexKey;
+  download(`descartes-backup-${new Date().toISOString().slice(0,10)}.json`, JSON.stringify({app:'descartes', version:VERSION, at:nowISO(), config:cfg, projects:S.projects})); };
+ACTIONS.importBackup = async () => { const f=$('#bkFile').files[0]; if(!f) return toast('Escolha o arquivo.'); const j=JSON.parse(await f.text()); if(j.app!=='descartes') return toast('Arquivo não é um backup do Descartes.');
+  let n=0; for (const rp of j.projects){ migrate(rp); const lp=S.projects.find(p=>p.id===rp.id); if(!lp){ S.projects.push(rp); n++; await DB.put('projects',rp); } else if (rp.updatedAt>lp.updatedAt){ Object.assign(lp, rp); n++; await DB.put('projects',lp); } }
+  if (!S.currentId && S.projects.length) S.currentId=S.projects[0].id; toast(`${n} projeto(s) importados ou atualizados.`); render(); };
+ACTIONS.exportDossier = () => {
+  const p=cur(); const w=window.open('','_blank'); if(!w) return toast('Permita pop-ups para gerar o dossiê.');
+  const L=p.lit; const vres=L.validation.sample.length?validationResults(p):null;
+  const sec=STAGES.map(st=>`<h2>${esc(st.name)} ${p.gates[st.id]?`<small>(portão em ${fmtDate(p.gates[st.id].at)}, ${p.gates[st.id].rounds} rodada(s))</small>`:'<small>(sem portão)</small>'}</h2><pre>${esc(stageText(p,st))}</pre>
+    ${st.criteria.length?`<table><tr><th>Critério</th><th>Sua nota</th><th>Crítico (última)</th></tr>${st.criteria.map(c=>{const lc=lastCritique(p,st.id); return `<tr><td>${esc(c.t)}${c.o?' *':''}</td><td>${p.stages[st.id].self[c.id]??'—'}</td><td>${lc?.result.avaliacoes.find(a=>a.criterio_id===c.id)?.nota??'—'}</td></tr>`;}).join('')}</table>`:''}`).join('');
+  const an=dagAnalysis(p.dag);
+  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Dossiê — ${esc(p.title)}</title><style>body{font:11pt/1.45 Georgia,serif;max-width:800px;margin:24px auto;padding:0 16px;color:#111}h1{font-size:20pt}h2{font-size:14pt;margin-top:22px;border-bottom:1px solid #ccc}small{color:#666;font-weight:normal}pre{white-space:pre-wrap;font:10.5pt/1.4 Georgia,serif;background:#f6f6f6;padding:8px}table{border-collapse:collapse;width:100%;font-size:10pt;margin:6px 0}td,th{border:1px solid #ccc;padding:3px 6px;text-align:left;vertical-align:top}</style></head><body>
+  <h1>Dossiê de concepção — ${esc(p.title)}</h1><p>Gerado pelo Descartes v${VERSION} em ${fmtDate(nowISO())}. * = critério obrigatório.</p>${sec}
+  <h2>DAG</h2><p>Exposição: ${esc(p.dag.exposure)}; desfecho: ${esc(p.dag.outcome)}; ajustados: ${esc((p.dag.adjust||[]).join(', '))}. Caminhos pela porta dos fundos abertos: ${an.paths.filter(x=>x.open).length} de ${an.paths.length}.</p>
+  <h2>Literatura</h2><p>${L.records.length} registros; ${included(p).length} incluídos. Critérios de triagem:</p><pre>${esc(L.criteria)}</pre>
+  <table><tr><th>Data</th><th>Fonte</th><th>Tipo</th><th>Consulta</th><th>n</th><th>novos</th></tr>${L.searches.map(s=>`<tr><td>${fmtDate(s.at)}</td><td>${esc(s.fonte)}</td><td>${esc(s.tipo)}</td><td>${esc(s.consulta)}</td><td>${s.n}</td><td>${s.novos}</td></tr>`).join('')}</table>
+  ${vres?`<h3>Validação da extração (limiar ${L.validation.threshold})</h3><table><tr><th>Campo</th><th>n</th><th>Concordância</th><th>Kappa</th><th>Situação</th></tr>${L.schema.map(f=>`<tr><td>${esc(f.nome)}</td><td>${vres[f.id].n}</td><td>${vres[f.id].agree==null?'—':(100*vres[f.id].agree).toFixed(0)+'%'}</td><td>${vres[f.id].kappa==null?'—':vres[f.id].kappa.toFixed(2)}</td><td>${vres[f.id].pass?'aprovado':'reprovado'}</td></tr>`).join('')}</table>`:''}
+  <h3>Lacuna</h3><p>${esc(L.gap.claim||'—')}</p><p>${gapDeclared(p)?`Declarada não refutada em ${fmtDate(L.gap.declaredAt)}. Justificativa: ${esc(L.gap.justification)}`:'Não declarada.'}</p>
+  <h2>Diário de decisões</h2><table><tr><th>Data</th><th>Estágio</th><th>Tipo</th><th>Conteúdo</th><th>Decisão</th><th>Justificativa</th></tr>${p.diary.map(d=>`<tr><td>${fmtDate(d.at)}</td><td>${esc(d.stageName||'')}</td><td>${esc(d.kind)}</td><td>${esc(d.text||'')}</td><td>${esc(d.decision||'')}</td><td>${esc(d.justification||'')}</td></tr>`).join('')}</table>
+  <script>setTimeout(()=>print(),400)<\/script></body></html>`);
+  w.document.close();
+};
+
+/* ---------- Google Drive (pasta do aplicativo) ---------- */
+const Sync = {
+  token:null, exp:0, fileId:null, status:'não conectado', timer:null, running:false,
+  init(){ if (S.config.googleClientId) this.loadGIS().catch(()=>{}); this.setStatus(S.config.googleClientId && localStorage.getItem('descartesDrive')==='1' ? 'Drive: toque para sincronizar' : 'local'); },
+  setStatus(s){ this.status=s; const el=$('#syncStatus'); if(el){ el.textContent=s; el.dataset.act='driveConnect'; el.style.cursor='pointer'; } },
+  loadGIS(){ return new Promise((res,rej)=>{ if (window.google?.accounts?.oauth2) return res(); const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client'; s.onload=res; s.onerror=()=>rej(new Error('Falha ao carregar o login do Google')); document.head.appendChild(s); }); },
+  async getToken(){ if (this.token && Date.now()<this.exp-60000) return this.token; if (!S.config.googleClientId) throw new Error('Informe o ID do cliente OAuth nas Configurações.');
+    await this.loadGIS(); return new Promise((res,rej)=>{ const tc=google.accounts.oauth2.initTokenClient({client_id:S.config.googleClientId, scope:'https://www.googleapis.com/auth/drive.appdata',
+      callback:r=>{ if(r.error) return rej(new Error(r.error)); this.token=r.access_token; this.exp=Date.now()+r.expires_in*1000; localStorage.setItem('descartesDrive','1'); res(this.token); }}); tc.requestAccessToken({prompt:this.token?'':undefined}); }); },
+  async api(url, opt={}){ const t=await this.getToken(); const r=await fetch(url,{...opt, headers:{...(opt.headers||{}), Authorization:'Bearer '+t}}); if(!r.ok) throw new Error('Drive HTTP '+r.status); return r; },
+  async findFile(){ const r=await this.api(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${encodeURIComponent("name='descartes.json'")}&fields=files(id,modifiedTime)`); const j=await r.json(); this.fileId=j.files?.[0]?.id||null; return this.fileId; },
+  async sync(){
+    if (this.running) return; this.running=true; this.setStatus('Drive: sincronizando…');
+    try{
+      const deleted=(await DB.get('kv','deleted'))||{};
+      if (await this.findFile()){ const r=await this.api(`https://www.googleapis.com/drive/v3/files/${this.fileId}?alt=media`); const remote=await r.json();
+        Object.assign(deleted, remote.deleted||{});
+        for (const rp of remote.projects||[]){ if (deleted[rp.id]) continue; migrate(rp); const lp=S.projects.find(p=>p.id===rp.id);
+          if (!lp){ S.projects.push(rp); await DB.put('projects',rp); } else if (rp.updatedAt>lp.updatedAt){ Object.assign(lp,rp); await DB.put('projects',lp); } } }
+      for (const id of Object.keys(deleted)){ if (S.projects.find(p=>p.id===id)){ S.projects=S.projects.filter(p=>p.id!==id); await DB.del('projects',id); } }
+      await DB.put('kv',deleted,'deleted');
+      const body=JSON.stringify({app:'descartes', version:VERSION, at:nowISO(), projects:S.projects, deleted});
+      if (this.fileId) await this.api(`https://www.googleapis.com/upload/drive/v3/files/${this.fileId}?uploadType=media`,{method:'PATCH', headers:{'Content-Type':'application/json'}, body});
+      else { const fd=new FormData(); fd.append('metadata', new Blob([JSON.stringify({name:'descartes.json', parents:['appDataFolder']})],{type:'application/json'})); fd.append('file', new Blob([body],{type:'application/json'}));
+        await this.api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST', body:fd}); }
+      if (!S.projects.find(p=>p.id===S.currentId)) S.currentId=S.projects[0]?.id||null;
+      this.setStatus('Drive: '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})); render();
+      if (LLM.online) Queue.process();
+    }catch(e){ this.setStatus('Drive: erro'); toast('Sincronização: '+e.message, 6000); }
+    this.running=false;
+  },
+  schedule(){ if (!this.token) return; clearTimeout(this.timer); this.timer=setTimeout(()=>this.sync(), 8000); },
+  async markDeleted(id){ const d=(await DB.get('kv','deleted'))||{}; d[id]=nowISO(); await DB.put('kv',d,'deleted'); this.schedule(); },
+};
+ACTIONS.driveConnect = () => Sync.sync();
+boot();
+</script>
+</body>
+</html>
