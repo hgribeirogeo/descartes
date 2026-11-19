@@ -11,22 +11,28 @@ Aplicativo de uso pessoal para conceber pesquisas do esboço à teoria. Funciona
 
 A pasta `testes/` não precisa ir para o repositório. Ela serve para repetir os testes automatizados.
 
-## 2. Instalar o Qwen no PC (Windows)
+## 2. Preparar o Qwen (Ollama no WSL)
 
-1. Instale o Ollama: https://ollama.com/download
-2. No PowerShell, baixe os modelos:
+1. No terminal do WSL, libere o site e reduza o uso de memória de vídeo:
+   ```
+   sudo systemctl edit ollama.service
+   ```
+   Cole, salve e saia:
+   ```
+   [Service]
+   Environment="OLLAMA_ORIGINS=https://hgribeirogeo.github.io"
+   Environment="OLLAMA_FLASH_ATTENTION=1"
+   Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+   ```
+   Depois: `sudo systemctl daemon-reload && sudo systemctl restart ollama`
+2. Baixe os modelos:
    ```
    ollama pull qwen3:14b
    ollama pull qwen3-embedding:0.6b
    ```
-   O `qwen3:14b` tem cerca de 9 GB e cabe inteiro na RTX 3060 de 12 GB. Para comparar depois: `ollama pull qwen3:30b-a3b`, que roda dividido entre a placa e a RAM.
-3. Libere o site para conversar com o Ollama. No PowerShell:
-   ```
-   setx OLLAMA_ORIGINS "https://hgribeirogeo.github.io"
-   ```
-   Feche o Ollama pelo ícone da bandeja e abra de novo.
-4. Abra o Descartes no Chrome ou no Edge. Na primeira chamada, o navegador pede permissão para acessar dispositivos da rede local. Aceite: é o Ollama no seu próprio PC.
-5. Vá em **Configurações → Testar conexão**. O selo no topo deve mostrar "IA: Qwen local".
+3. Confira: `ollama run qwen3:14b --verbose "Responda apenas: ok"` duas vezes e depois `ollama ps`. A coluna PROCESSOR deve mostrar `100% GPU`.
+4. Abra o Descartes no Chrome ou no Edge. Na primeira chamada, o navegador pede permissão para acessar a rede local. Aceite: é o Ollama no seu próprio PC.
+5. Em **Configurações → Testar conexão**, o selo no topo deve mostrar "IA: Qwen local".
 
 ## 3. Bases bibliográficas (nada a configurar)
 
