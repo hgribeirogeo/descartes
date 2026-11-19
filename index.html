@@ -99,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.2 — núcleo ================= */
-const VERSION = '0.2.1';
+const VERSION = '0.2.3';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -333,7 +333,9 @@ ACTIONS.searchOA = async () => {
 const S2F='paperId,title,abstract,year,externalIds,authors,venue,citationCount';
 const s2Map = d => ({title:d.title, abstract:d.abstract, doi:d.externalIds?.DOI, year:d.year, authors:(d.authors||[]).slice(0,6).map(a=>a.name).join('; '), venue:d.venue, citedBy:d.citationCount, s2Id:d.paperId});
 async function s2Fetch(url, opt={}){
-  for (let i=0;i<5;i++){ const r=await fetch(url,opt); if (r.status===429){ await new Promise(s=>setTimeout(s,2000*(i+1))); continue; }
+  for (let i=0;i<5;i++){
+    let r; try{ r=await fetch(url,opt); }catch(e){ await new Promise(s=>setTimeout(s,2500*(i+1))); continue; }  // limite de uso chega sem permissão CORS e aparece como falha de rede
+    if (r.status===429){ await new Promise(s=>setTimeout(s,2500*(i+1))); continue; }
     if (!r.ok) throw new Error('Semantic Scholar HTTP '+r.status); return r.json(); }
   throw new Error('Semantic Scholar ocupado (limite compartilhado). Tente de novo em alguns minutos.');
 }
@@ -791,7 +793,7 @@ async function analyzeItem(p, key){
     let queries = (it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
     if (!queries.length){
       setStep(key,'Gerando consultas de busca…');
-      queries=(await generateQueries(key, text)).map(x=>x.consulta); it.queries=queries.join('\n');
+      const cal=await calibrateQueries(key, text, await generateQueries(key, text), m=>setStep(key,m)); storeQueries(it, cal); queries=cal.map(x=>x.consulta);
     }
     A.queries=queries;
     /* 2. Busca e acúmulo no corpus do projeto */
@@ -870,18 +872,57 @@ async function analyzeItem(p, key){
   }catch(e){ if (e.message!=='interrompida') toast('Análise: '+e.message, 8000); else toast('Análise interrompida.'); }
   delete S.busy['an_'+key]; touch(p); render();
 }
+const QUERY_RULES = `Regras de construção (API bulk do Semantic Scholar, busca no título e no resumo):
+- Pense em BLOCOS de conceitos. Dentro de um bloco, sinônimos e variantes ligados por | entre parênteses. Entre blocos, use +.
+- Use de 2 a 4 blocos por consulta. Cada bloco a mais estreita muito a busca.
+- Aspas só para termos consagrados de 2 ou 3 palavras (ex.: "change detection", "burned area"). Nunca ponha uma frase descritiva longa entre aspas.
+- Evite exclusões com -. Use no máximo uma, e só se houver um sentido ambíguo claro.
+- Termos em inglês. Inclua variantes de grafia e sinônimos técnicos.
+- Exemplo de forma (outro tema): (glacier | "ice cover") + (retreat | loss | "area change") + (Landsat | Sentinel-2 | "remote sensing") + (Andes | tropical)`;
 async function generateQueries(key, text){
-  const q=await LLM.chatValid({system:'Você monta consultas para a API de busca do Semantic Scholar (busca no título e no resumo). Sintaxe: "frase exata", + (e), | (ou), - (excluir), parênteses. Gere de 2 a 3 consultas em inglês, complementares: cada uma cobre um ângulo do item (fenômeno, método ou dado, contexto). Específicas o bastante para trazer os estudos mais próximos e amplas o bastante para não perder sinônimos. Não invente siglas. Em "objetivo", diga em português, em até 15 palavras, que parte do item a consulta cobre.',
-    user:`ITEM (${ITEMS[key].name}):\n${text}`, schema:{type:'object',required:['consultas'],properties:{consultas:{type:'array',items:{type:'object',required:['consulta','objetivo'],properties:{consulta:{type:'string'},objetivo:{type:'string'}}}}}}},
-    o=>Array.isArray(o.consultas)&&o.consultas.length&&o.consultas.every(x=>x.consulta)?null:'consultas');
+  const q=await LLM.chatValid({system:`Você monta consultas de busca bibliográfica. Gere de 2 a 3 consultas complementares para o item: cada uma cobre um ângulo (fenômeno, método ou dado, contexto). ${QUERY_RULES}\nEm "objetivo", diga em português, em até 15 palavras, que parte do item a consulta cobre.`,
+    user:`ITEM (${ITEMS[key].name}):\n${text}`, schema:qSchema}, o=>Array.isArray(o.consultas)&&o.consultas.length&&o.consultas.every(x=>x.consulta)?null:'consultas');
   return q.consultas.slice(0,3).map(x=>({consulta:x.consulta.trim(), objetivo:(x.objetivo||'').trim()})).filter(x=>x.consulta);
+}
+const qSchema={type:'object',required:['consultas'],properties:{consultas:{type:'array',items:{type:'object',required:['consulta','objetivo'],properties:{consulta:{type:'string'},objetivo:{type:'string'}}}}}};
+const Q_MIN=20, Q_MAX=5000;
+async function testQuery(q){
+  try{ const j=await s2Fetch(`https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodeURIComponent(q)}&fields=title,year,citationCount&sort=citationCount:desc`);
+    return {q, total:j.total??(j.data||[]).length, top:(j.data||[]).slice(0,5).map(d=>({title:d.title, year:d.year, c:d.citationCount}))}; }
+  catch(e){ return {q, erro:e.message}; }
+}
+function lintQuery(q){
+  const w=[]; for (const m of q.matchAll(/"([^"]+)"/g)) if (m[1].trim().split(/\s+/).length>3) w.push(`frase longa entre aspas: "${m[1]}"`);
+  if ((q.match(/(^|\s)-\s*[\w("]/g)||[]).length>1) w.push('mais de uma exclusão (-)');
+  if (q.split('+').length>5) w.push('blocos demais (+)');
+  return w;
+}
+/* Testa as consultas e devolve ao Qwen as que ficaram fora da faixa, com a contagem, por até 2 rodadas */
+async function calibrateQueries(key, text, qs, onMsg){
+  let list=qs.map(x=>({...x}));
+  for (let round=0; round<3; round++){
+    for (const x of list){ if (x.tested) continue; onMsg?.(`Testando consultas (rodada ${round+1})…`); Object.assign(x, await testQuery(x.consulta)); x.tested=true; await sleep(1100); }
+    const bad=list.filter(x=>!x.erro && (x.total<Q_MIN || x.total>Q_MAX));
+    if (!bad.length || round===2) break;
+    onMsg?.(`Ajustando ${bad.length} consulta(s) fora da faixa…`);
+    const o=await LLM.chatValid({system:`Você ajusta consultas de busca bibliográfica que trouxeram resultados demais ou de menos. Para cada consulta, devolva uma versão corrigida que mantenha o mesmo ângulo. Poucos resultados: tire aspas de frases, acrescente sinônimos com |, remova um bloco ou uma exclusão. Resultados demais: acrescente um bloco que delimite o tema. Faixa desejada: entre ${Q_MIN} e ${Q_MAX} artigos. ${QUERY_RULES}`,
+      user:`ITEM:\n${text}\n\nCONSULTAS E CONTAGENS:\n`+bad.map((x,i)=>`${i+1}. ${x.consulta} → ${x.total} artigos (${x.total<Q_MIN?'poucos':'demais'})`).join('\n')+`\n\nDevolva ${bad.length} consulta(s), na mesma ordem.`, schema:qSchema},
+      o=>Array.isArray(o.consultas)&&o.consultas.length===bad.length?null:'quantidade');
+    bad.forEach((x,i)=>{ const n=o.consultas[i]; x.antes=(x.antes||[]).concat([{q:x.consulta,total:x.total}]); x.consulta=n.consulta.trim(); x.objetivo=n.objetivo||x.objetivo; x.tested=false; });
+  }
+  return list;
+}
+function storeQueries(it, list){
+  const seen=new Set(); list=list.filter(x=>{ const k=normTxt(x.consulta); if(seen.has(k)) return false; seen.add(k); return true; });
+  it.queries=list.map(x=>x.consulta).join('\n'); it.queryNotes=Object.fromEntries(list.map(x=>[x.consulta,x.objetivo]));
+  it.queryPreview={at:nowISO(), hash:hashStr(it.queries), list:list.map(x=>({q:x.consulta, total:x.total, top:x.top||[], erro:x.erro, antes:x.antes}))};
 }
 ACTIONS.suggestQueries = async el => {
   const p=cur(), key=el.dataset.k, it=p.items[key], text=itemText(p,key);
   if (text.length<20) return toast('Escreva o item antes.');
   if (it.queries?.trim() && !confirm('Substituir as consultas atuais pelas sugeridas?')) return;
   S.busy['q_'+key]='Qwen sugerindo consultas…'; render();
-  try{ const qs=await generateQueries(key, text); it.queries=qs.map(x=>x.consulta).join('\n'); it.queryNotes=Object.fromEntries(qs.map(x=>[x.consulta,x.objetivo])); it.queryPreview=null; touch(p); }
+  try{ const qs=await generateQueries(key, text); const cal=await calibrateQueries(key, text, qs, m=>{ S.busy['q_'+key]=m; render(); }); storeQueries(it, cal); touch(p); }
   catch(e){ toast('Sugestão: '+e.message, 7000); }
   delete S.busy['q_'+key]; render();
 };
@@ -889,24 +930,20 @@ ACTIONS.previewQueries = async el => {
   const p=cur(), key=el.dataset.k, it=p.items[key]; const qs=(it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
   if (!qs.length) return toast('Escreva ou sugira as consultas primeiro.');
   S.busy['q_'+key]='Testando consultas no Semantic Scholar…'; render(); const prev=[];
-  for (const q of qs){
-    try{ const j=await s2Fetch(`https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodeURIComponent(q)}&fields=title,year,citationCount&sort=citationCount:desc`);
-      prev.push({q, total:j.total??(j.data||[]).length, top:(j.data||[]).slice(0,5).map(d=>({title:d.title, year:d.year, c:d.citationCount}))}); }
-    catch(e){ prev.push({q, erro:e.message}); }
-    await sleep(1100);
-  }
+  for (const q of qs){ prev.push(await testQuery(q)); await sleep(1100); }
   it.queryPreview={at:nowISO(), hash:hashStr(it.queries), list:prev}; touch(p); delete S.busy['q_'+key]; render();
 };
 function renderQueries(p, key){
   const it=p.items[key], busy=S.busy['q_'+key]; const qs=(it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const pv = it.queryPreview && it.queryPreview.hash===hashStr(it.queries||'') ? it.queryPreview.list : null;
   const notes=it.queryNotes||{};
-  const flag=t=> t>5000?'<span class="pill warn">ampla demais</span>':t<20?'<span class="pill warn">restrita demais</span>':'<span class="pill ok">bom tamanho</span>';
+  const flag=t=> t>Q_MAX?'<span class="pill warn">ampla demais</span>':t<Q_MIN?'<span class="pill warn">restrita demais</span>':'<span class="pill ok">bom tamanho</span>';
   return `<div class="crit" style="margin-top:10px"><div class="row"><b>1. Consultas de busca</b><span class="small muted">uma por linha · "frase exata", + (e), | (ou), - (excluir), parênteses</span></div>
     <textarea id="it_${key}_q" rows="3" data-bind="items.${key}.queries" data-rerender="1" placeholder="Clique em Sugerir para o Qwen propor a partir do seu texto">${esc(it.queries||'')}</textarea>
     ${qs.some(q=>notes[q])?`<ul class="small" style="margin:4px 0">${qs.filter(q=>notes[q]).map(q=>`<li><code>${esc(q)}</code> — ${esc(notes[q])}</li>`).join('')}</ul>`:''}
     <div class="row" style="margin-top:6px">${busy?`<span class="pill warn">${esc(busy)}</span>`:`<button class="b sec" data-act="suggestQueries" data-k="${key}" ${LLM.online?'':'disabled'}>Sugerir consultas</button><button class="b sec" data-act="previewQueries" data-k="${key}" ${qs.length?'':'disabled'}>Testar consultas</button>`}</div>
-    ${pv?pv.map(x=>`<div class="small" style="margin-top:6px"><code>${esc(x.q)}</code> ${x.erro?`<span class="pill bad">${esc(x.erro)}</span>`:`→ <b>${x.total}</b> artigos ${flag(x.total)}<div class="muted">Mais citados: ${x.top.map(t=>`${esc(t.title)} (${t.year||''})`).join(' · ')||'—'}</div>`}</div>`).join(''):(qs.length?'<p class="small muted">Teste as consultas para ver quantos artigos cada uma traz antes de analisar.</p>':'')}</div>`;
+    ${qs.map(q=>({q,w:lintQuery(q)})).filter(x=>x.w.length).map(x=>`<div class="small"><span class="pill warn">revise</span> <code>${esc(x.q)}</code>: ${esc(x.w.join('; '))}</div>`).join('')}
+    ${pv?pv.map(x=>`<div class="small" style="margin-top:6px"><code>${esc(x.q)}</code> ${x.erro?`<span class="pill bad">${esc(x.erro)}</span>`:`→ <b>${x.total}</b> artigos ${flag(x.total)}${x.antes?.length?` <span class="muted">(ajustada: antes ${x.antes.map(a=>a.total).join(' → ')} artigos)</span>`:''}<div class="muted">Mais citados: ${x.top.map(t=>`${esc(t.title)} (${t.year||''})`).join(' · ')||'—'}</div>`}</div>`).join(''):(qs.length?'<p class="small muted">Teste as consultas para ver quantos artigos cada uma traz antes de analisar.</p>':'')}</div>`;
 }
 const frasesSchema={type:'object',required:['frases'],properties:{frases:{type:'array',items:{type:'object',required:['texto','ids'],properties:{texto:{type:'string'},ids:{type:'array',items:{type:'string'}}}}}}};
 const cardSchema = withQuote => ({type:'object', required:['status','justificativa','sugestao', withQuote?'trecho':'ids'], properties:{
@@ -951,10 +988,12 @@ const refLink = r => r ? (r.doi?`<a href="https://doi.org/${esc(r.doi)}" target=
 function journalPicker(p){
   const j=p.journal; const opts=S.catalog.slice(0,3000).map(c=>`<option value="${esc(c.nome)}">`).join('');
   const links = j ? [j.pagina&&`<a href="${esc(j.pagina)}" target="_blank" rel="noopener">Página</a>`, j.normas&&`<a href="${esc(j.normas)}" target="_blank" rel="noopener">Normas</a>`, j.escopo&&`<a href="${esc(j.escopo)}" target="_blank" rel="noopener">Escopo</a>`].filter(Boolean).join(' · ') : '';
-  return `<div class="row small"><label>Revista-alvo</label><input type="text" id="jrnl" list="dlJ" style="max-width:360px" value="${esc(j?.name||'')}" placeholder="${S.catalog.length?'escolha do catálogo do LabResearch':'nome da revista'}"><datalist id="dlJ">${opts}</datalist><button class="b sec" data-act="setJournal">Definir</button>${j?.qualis?`<span class="pill">Qualis ${esc(j.qualis)}</span>`:''} ${links}</div>`;
+  return `<div class="row small"><label>Revista-alvo</label><input type="text" id="jrnl" list="dlJ" style="max-width:360px" value="${esc(j?.name||'')}" placeholder="${S.catalog.length?'escolha do catálogo do LabResearch':'nome da revista'}"><datalist id="dlJ">${opts}</datalist><button class="b sec" data-act="setJournal">Definir</button>${j?.qualis?`<span class="pill">Qualis ${esc(j.qualis)}</span>`:''}${j?.fora?'<span class="pill warn">fora do catálogo: confira o nome</span>':''} ${links}</div>`;
 }
 ACTIONS.setJournal = () => { const p=cur(); const v=$('#jrnl').value.trim(); if(!v){ p.journal=null; touch(p); return render(); }
-  const c=S.catalog.find(x=>normTxt(x.nome)===normTxt(v)); p.journal = c ? {name:c.nome, issn:c.issn, pagina:c.pagina, normas:c.normas, escopo:c.escopo, qualis:c.qualis} : {name:v}; touch(p); render(); };
+  const c=S.catalog.find(x=>normTxt(x.nome)===normTxt(v)); p.journal = c ? {name:c.nome, issn:c.issn, pagina:c.pagina, normas:c.normas, escopo:c.escopo, qualis:c.qualis} : {name:v, fora:true};
+  if (!c) toast(S.catalog.length?'Essa revista não está no catálogo do LabResearch. Confira o nome completo (ex.: Remote Sensing of Environment): o alinhamento busca artigos pelo nome exato da revista.':'Sem catálogo: use o nome completo e exato da revista.', 8000);
+  touch(p); render(); };
 
 function renderItem(p, key){
   const def=ITEMS[key], it=p.items[key], b=S.busy['an_'+key];
@@ -1049,7 +1088,8 @@ function renderConfig(){
     <p class="small muted">Com 100 artigos a leitura leva cerca de 7–8 min no seu PC. Artigos já lidos para a mesma versão do item não são relidos.</p></div>
   <div class="card"><h2>Sincronização (mesmo Gist do LabResearch)</h2><p class="small muted">O Descartes grava só no arquivo <code>descartes.json</code> do Gist; o arquivo do LabResearch não é alterado. O catálogo de revistas é lido do LabResearch.</p>
     ${inp('gistId','ID do Gist','text')}${inp('githubToken','Token do GitHub (fica só neste aparelho)','password')}
-    <div class="row"><button class="b sec" data-act="detectLab">Usar a configuração do LabResearch deste navegador</button><button class="b" data-act="syncNow">Sincronizar agora</button><span class="small">${esc(Sync.status)}</span></div>
+    <p class="small muted">Use um token <i>fine-grained</i> com permissão apenas para Gists. O token fica só neste aparelho e é enviado somente à API do GitHub.</p>
+    <div class="row"><button class="b" data-act="syncNow">Sincronizar agora</button><span class="small">${esc(Sync.status)}</span></div>
     <p class="small">Catálogo de revistas: <b>${S.catalog.length}</b> revistas.</p></div>
   <div class="card"><h2>Backup</h2><div class="row"><button class="b sec" data-act="exportBackup">Exportar backup (JSON)</button><input type="file" id="bkFile" accept=".json"><button class="b sec" data-act="importBackup">Importar backup</button></div>
     ${cur()?`<div class="row" style="margin-top:10px"><button class="b danger" data-act="deleteProject">Excluir projeto atual</button></div>`:''}<p class="small muted">Descartes v${VERSION}</p></div>`;
@@ -1093,28 +1133,12 @@ function findJournals(obj, out=[], depth=0){
 }
 async function setCatalog(list){ const m=new Map(); for (const j of list) if (j.nome && !m.has(normTxt(j.nome))) m.set(normTxt(j.nome), j); if (!m.size) return false;
   S.catalog=[...m.values()].sort((a,b)=>a.nome.localeCompare(b.nome)); await DB.put('kv', S.catalog, 'catalog'); return true; }
-function scanLocalStorage(){
-  const found={token:'', gist:'', journals:[]}; let ls; try{ ls=window.localStorage; }catch(e){ return found; }
-  const tokRe=/(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})/; const gistRe=/^[0-9a-f]{20,40}$/i;
-  const walk=(o,keyName='')=>{ if (typeof o==='string'){ const t=o.match(tokRe); if(t&&!found.token) found.token=t[1]; if(/gist/i.test(keyName) && gistRe.test(o.trim()) && !found.gist) found.gist=o.trim(); return; }
-    if (o && typeof o==='object') for (const [k,v] of Object.entries(o)) walk(v,k); };
-  for (let i=0;i<ls.length;i++){ const k=ls.key(i); if (/^descartes/i.test(k)) continue; const v=ls.getItem(k); let j=null; try{ j=JSON.parse(v); }catch(e){}
-    if (j!==null && typeof j==='object'){ walk(j,k); findJournals(j, found.journals); } else walk(v,k); }
-  return found;
-}
-ACTIONS.detectLab = async () => { const f=scanLocalStorage();
-  if (f.token) S.config.githubToken=f.token; if (f.gist) S.config.gistId=f.gist; await saveConfig();
-  const cat = f.journals.length ? await setCatalog(f.journals) : false;
-  toast(`LabResearch neste navegador: ${f.token?'token encontrado':'token não encontrado'}, ${f.gist?'Gist encontrado':'Gist não encontrado'}, ${cat?S.catalog.length+' revistas':'catálogo não encontrado'}.`, 8000);
-  render(); if (S.config.gistId && S.config.githubToken) Sync.sync(); };
-
 /* ---------- Sincronização pelo Gist ---------- */
 const Sync = {
   status:'local', timer:null, running:false,
   ok(){ return !!(S.config.gistId && S.config.githubToken); },
   setStatus(s){ this.status=s; const el=$('#syncStatus'); if(el){ el.textContent=s; el.dataset.act='syncNow'; el.style.cursor='pointer'; } },
-  init(){ if (!this.ok()){ const f=scanLocalStorage(); if (f.token && f.gist){ S.config.githubToken=f.token; S.config.gistId=f.gist; saveConfig(); toast('Configuração do LabResearch encontrada neste navegador: usando o mesmo Gist.', 6000); } else if (f.journals.length && !S.catalog.length) setCatalog(f.journals); }
-    if (this.ok()) this.sync(); else this.setStatus('local'); },
+  init(){ if (this.ok()) this.sync(); else this.setStatus('local'); },
   async gh(method, body){ const r=await fetch(`https://api.github.com/gists/${S.config.gistId.trim()}`,{method, headers:{Authorization:'Bearer '+S.config.githubToken.trim(), Accept:'application/vnd.github+json', ...(body?{'Content-Type':'application/json'}:{})}, body:body?JSON.stringify(body):undefined});
     if (!r.ok) throw new Error('GitHub HTTP '+r.status); return r.json(); },
   async fileContent(f){ if (!f) return null; if (f.truncated){ const r=await fetch(f.raw_url); return r.ok? r.text() : null; } return f.content; },
