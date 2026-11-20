@@ -99,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.2 — núcleo ================= */
-const VERSION = '0.2.8';
+const VERSION = '0.2.9';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -755,7 +755,7 @@ const ITEMS = {
    {id:'pressupostos', t:'Pressupostos explícitos', src:'texto', d:'Pressupostos declarados e verificáveis, com validação contra padrões observados antes da intervenção ou em controles (Magliocca et al., 2023).'},
    {id:'coerencia', t:'Coerência com a hipótese', src:'cadeia', of:'hipotese', d:'O contrafactual permite testar a hipótese.'} ] },
 };
-const STATUS = {atende:['ok','atende'], parcial:['warn','parcial'], nao_atende:['bad','não atende'], sem_dados:['','sem dados']};
+const STATUS = {atende:['ok','atende'], parcial:['warn','parcial'], nao_atende:['bad','não atende'], sem_dados:['','sem dados'], inconclusivo:['warn','inconclusiva']};
 const SRC_LABEL = {lit:'literatura', texto:'texto', cadeia:'coerência', revista:'revista'};
 const itemText = (p, key) => ITEMS[key].fields.map(f=>(p.items[key].fields[f.id]||'').trim()).filter(Boolean).join('\n');
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
@@ -789,7 +789,7 @@ async function analyzeItem(p, key){
     let queries = (it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
     if (!queries.length){
       setStep(key,'Gerando consultas de busca…');
-      const B=await buildQueries(key, text, m=>setStep(key,m)); it.concepts=B.blocks; it.conceptsHash=A.textHash; storeQueries(it, B.list); queries=B.list.map(x=>x.consulta);
+      const B=await buildQueries(key, text, m=>setStep(key,m)); it.concepts=B.blocks; it.pruned=B.pruned; it.conceptsHash=A.textHash; storeQueries(it, B.list); queries=B.list.map(x=>x.consulta);
     }
     A.queries=queries; const hits=new Set();
     /* 1b. Conceitos do item (para medir a cobertura): os mesmos das consultas sugeridas; se você escreveu as consultas, o Qwen extrai agora */
@@ -922,12 +922,21 @@ async function buildQueries(key, text, onMsg){
   const test=async ix=>{ const q=ix.map(i=>blockStr(blocks[i])).join(' + ');
     if (!cache.has(q)){ onMsg?.(`Testando combinações de conceitos (${cache.size+1})…`); cache.set(q, await testQuery(q)); await sleep(1100); }
     return {...cache.get(q), q, ix}; };
-  const all=[...blocks.keys()], ctx=blocks.findIndex(b=>b.papel==='contexto'), fixo=i=>i===0||i===ctx;
+  const all=[...blocks.keys()], ctx=blocks.findIndex(b=>b.papel==='contexto'), mec=blocks.findIndex(b=>b.papel==='mecanismo'), fixo=i=>i===0||i===ctx||i===mec;
+  /* Termos sem nenhum resultado no contexto são descartados (só quando a consulta fica restrita demais); o conceito fica */
+  const pruned=[], podado=new Set();
+  const prune=async ix=>{ let mudou=false;
+    for (const i of ix){ if (i===ctx || podado.has(i)) continue; podado.add(i); const b=blocks[i]; if (b.terms.length<2) continue; const keep=[];
+      for (const t of b.terms){ onMsg?.(`Testando os termos de "${b.rotulo}"…`); const r=await testQuery([t, ...(ctx>=0?[blockStr(blocks[ctx])]:[])].join(' + ')); await sleep(1100);
+        if (r.erro || r.total>0) keep.push(t); else pruned.push(`${t} (${b.rotulo})`); }
+      if (keep.length && keep.length<b.terms.length){ b.terms=keep; mudou=true; } }
+    return mudou; };
   const combos=[all, ...all.filter(i=>!fixo(i)).map(i=>all.filter(j=>j!==i))].filter(c=>c.length>=2);
   const out=[];
   for (const c of combos){
     let ix=[...c], antes=[], r=await test(ix);
     while (!r.erro && r.total<Q_MIN && ix.length>2){ const d=[...ix].reverse().find(i=>!fixo(i)); if (d==null) break; antes.push({q:r.q,total:r.total}); ix=ix.filter(i=>i!==d); r=await test(ix); }
+    if (!r.erro && r.total<Q_MIN && await prune(ix)){ antes.push({q:r.q,total:r.total}); r=await test(ix); }   // objeto, mecanismo e contexto nunca saem: um corpus pequeno sobre o problema vale mais que um grande sem ele
     if (!out.some(x=>x.q===r.q)) out.push({...r, antes});
   }
   const ok=x=>!x.erro && x.total>=Q_MIN && x.total<=Q_MAX;
@@ -935,7 +944,7 @@ async function buildQueries(key, text, onMsg){
   if (!pool.length) pool=out.filter(x=>!x.erro).sort((a,b)=>Math.abs(Math.log((a.total||1)/300))-Math.abs(Math.log((b.total||1)/300)));
   const chosen=pool.slice(0,3);
   if (!chosen.length) throw new Error('O Semantic Scholar não respondeu aos testes. Tente de novo em alguns minutos.');
-  return {blocks, list:chosen.map(x=>({consulta:x.q, total:x.total, top:x.top||[], erro:x.erro, antes:x.antes.length?x.antes:undefined,
+  return {blocks, pruned, list:chosen.map(x=>({consulta:x.q, total:x.total, top:x.top||[], erro:x.erro, antes:x.antes.length?x.antes:undefined,
     objetivo:'Cobre: '+x.ix.map(i=>blocks[i].rotulo).join(' · ')+(x.ix.length<blocks.length?' (sem: '+all.filter(i=>!x.ix.includes(i)).map(i=>blocks[i].rotulo).join(', ')+')':'')}))};
 }
 async function testQuery(q){
@@ -959,7 +968,7 @@ ACTIONS.suggestQueries = async el => {
   if (text.length<20) return toast('Escreva o item antes.');
   if (it.queries?.trim() && !confirm('Substituir as consultas atuais pelas sugeridas?')) return;
   S.busy['q_'+key]='Qwen extraindo os conceitos do item…'; render();
-  try{ const B=await buildQueries(key, text, m=>{ S.busy['q_'+key]=m; render(); }); it.concepts=B.blocks; it.conceptsHash=hashStr(text); storeQueries(it, B.list); touch(p); }
+  try{ const B=await buildQueries(key, text, m=>{ S.busy['q_'+key]=m; render(); }); it.concepts=B.blocks; it.pruned=B.pruned; it.conceptsHash=hashStr(text); storeQueries(it, B.list); touch(p); }
   catch(e){ toast('Sugestão: '+e.message, 7000); }
   delete S.busy['q_'+key]; render();
 };
@@ -980,6 +989,7 @@ function renderQueries(p, key){
     ${it.concepts?.length?(()=>{ const atual=it.conceptsHash===hashStr(itemText(p,key)); const nq=b=>qs.filter(q=>blockInText(b,q)).length;
       return `<div class="small" style="margin:4px 0"><b>Conceitos extraídos</b> (do mais ao menos essencial)${atual?'':' <span class="pill warn">de uma versão anterior do texto: clique em Sugerir para atualizar</span>'}:${it.concepts.map(b=>{ const k=nq(b);
         return `<div><span class="pill">${esc(PAPEL[b.papel]||b.papel)}</span> ${esc(b.rotulo)}: <code>${esc(b.terms.join(' | '))}</code> ${qs.length?(k?`<span class="pill ok">em ${k} consulta${k>1?'s':''}</span>`:'<span class="pill warn">em nenhuma consulta</span>'):''}</div>`; }).join('')}
+      ${atual&&it.pruned?.length?`<div class="small muted">Termos descartados por não trazerem nenhum artigo no contexto: ${esc(it.pruned.join('; '))}</div>`:''}
       ${qs.length&&it.concepts.some(b=>!nq(b))?`<div class="small"><span class="pill warn">atenção</span> Conceitos que não aparecem em nenhuma consulta não serão amostrados na busca. Se forem centrais no item, escreva uma consulta que exija esse bloco.</div>`:''}</div>`; })():''}
     ${qs.some(q=>notes[q])?`<ul class="small" style="margin:4px 0">${qs.filter(q=>notes[q]).map(q=>`<li><code>${esc(q)}</code> — ${esc(notes[q])}</li>`).join('')}</ul>`:''}
     <div class="row" style="margin-top:6px">${busy?`<span class="pill warn">${esc(busy)}</span>`:`<button class="b sec" data-act="suggestQueries" data-k="${key}" ${LLM.online?'':'disabled'}>Sugerir consultas</button><button class="b sec" data-act="previewQueries" data-k="${key}" ${qs.length?'':'disabled'}>Testar consultas</button>`}</div>
@@ -987,13 +997,30 @@ function renderQueries(p, key){
     ${pv?pv.map(x=>`<div class="small" style="margin-top:6px"><code>${esc(x.q)}</code> ${x.erro?`<span class="pill bad">${esc(x.erro)}</span>`:`→ <b>${x.total}</b> artigos ${flag(x.total)}${x.antes?.length?` <span class="muted">(ajustada: antes ${x.antes.map(a=>a.total).join(' → ')} artigos)</span>`:''}<div class="muted">Mais citados: ${x.top.map(t=>`${esc(t.title)} (${t.year||''})`).join(' · ')||'—'}</div>`}</div>`).join(''):(qs.length?'<p class="small muted">Teste as consultas para ver quantos artigos cada uma traz antes de analisar.</p>':'')}</div>`;
 }
 const frasesSchema={type:'object',required:['frases'],properties:{frases:{type:'array',items:{type:'object',required:['texto','ids'],properties:{texto:{type:'string'},ids:{type:'array',items:{type:'string'}}}}}}};
-const cardSchema = withQuote => ({type:'object', required:['status','justificativa','sugestao', withQuote?'trecho':'ids'], properties:{
+const cardSchema = withQuote => ({type:'object', required:['status','justificativa','sugestao','faltas', withQuote?'trecho':'ids'], properties:{
   status:{type:'string',enum:['atende','parcial','nao_atende']}, justificativa:{type:'string'}, sugestao:{type:'string'},
-  ...(withQuote?{trecho:{type:'string'}}:{ids:{type:'array',items:{type:'string'}}})}});
+  faltas:{type:'array',items:{type:'string'}}, ...(withQuote?{trecho:{type:'string'}}:{ids:{type:'array',items:{type:'string'}}})}});
 const CARD_SYS = c => `Você é um revisor de periódico Q1 em sensoriamento remoto, geoprocessamento e ciências ambientais. Avalie UM critério: "${c.t}" — ${c.d}
-Responda com: "status" (atende, parcial ou nao_atende), "justificativa" (até 60 palavras, específica), "sugestao" (onde e como melhorar, até 60 palavras; não reescreva o item inteiro). Seja rigoroso: na dúvida, "parcial". Antes de apontar que falta algo, confira se o item já traz esse elemento (período, lugar, sensor, unidade de análise etc.); nunca diga que falta o que está escrito. Aponte só o que de fato falta, de forma específica. Português.`;
+Responda com: "status" (atende, parcial ou nao_atende), "justificativa" (até 60 palavras, específica), "sugestao" (onde e como melhorar, até 60 palavras; não reescreva o item inteiro). Seja rigoroso: na dúvida, "parcial". Antes de apontar que falta algo, confira se o item já traz esse elemento (período, lugar, sensor, unidade de análise etc.); nunca diga que falta o que está escrito. Aponte só o que de fato falta, de forma específica. "faltas": lista do que você afirma que falta no item, cada elemento em 1 a 4 palavras (ex.: "unidade de análise", "período de estudo"); [] se nada falta. Português.`;
 
+/* O código confere cada ausência apontada pelo Qwen: no texto (direto ou pelos números) e, se não achar, pedindo um trecho literal verificado */
+async function checkFaltas(faltas, text){
+  const out=[], n=normTxt(text);
+  for (const f of (faltas||[]).slice(0,4)){
+    const nf=normTxt(f).replace(/["“”]/g,'').trim(); if (nf.length<3) continue; const nums=nf.match(/\d{2,}/g)||[];
+    if (n.includes(nf) || (nums.length && nums.every(x=>n.includes(x)))){ out.push({falta:f, trecho:''}); continue; }
+    try{ const o=await LLM.chatValid({system:'Verifique se o ITEM já contém o elemento indicado, mesmo com outras palavras. "contem": true ou false. "trecho": cópia literal do ITEM que mostra o elemento, ou "".', user:`ELEMENTO: ${f}\n\nITEM:\n${text}`,
+        schema:{type:'object',required:['contem','trecho'],properties:{contem:{type:'boolean'},trecho:{type:'string'}}}}, o=>typeof o.contem==='boolean'?null:'contem');
+      if (o.contem && quoteOK(o.trecho, text)) out.push({falta:f, trecho:o.trecho}); }catch(e){}
+  }
+  return out;
+}
 async function evalCriterion(p, key, c, text, A, evid){
+  const r=await evalCriterion0(p, key, c, text, A, evid);
+  if (r.faltas?.length) r.contestadas=await checkFaltas(r.faltas, text);
+  return r;
+}
+async function evalCriterion0(p, key, c, text, A, evid){
   const base={id:c.id, t:c.t, src:c.src};
   if (c.src==='texto'){
     const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"trecho": cópia literal do item que justifica o status, ou "" se o item não trata do critério.', user:`ITEM:\n${text}`, schema:cardSchema(true)}, o=>STATUS[o.status]?null:'status');
@@ -1009,13 +1036,15 @@ async function evalCriterion(p, key, c, text, A, evid){
     const rs={total:0,data:[]}; const y=new Date().getFullYear(); const seen=new Set(); let falhou='';
     const ob=A.concepts?.find(b=>b.papel==='objeto'), cx=A.concepts?.find(b=>b.papel==='contexto');
     const ampla = ob ? [ob, cx].filter(Boolean).map(blockStr).join(' + ') : '';   // revista: busca ampla (objeto + contexto), depois as consultas da análise
+    let amplaN=null;
     for (const q of [ampla, ...(A.queries.length?A.queries:[text.slice(0,120)])].filter(Boolean)){
-      try{ const r=await s2Bulk(q, 40, `&venue=${encodeURIComponent(j.name)}&year=${y-5}-${y}`); for (const d of r.data){ const kk=(d.doi||d.title||'').toLowerCase(); if (kk && !seen.has(kk)){ seen.add(kk); rs.data.push(d); } } }
+      try{ const r=await s2Bulk(q, 40, `&venue=${encodeURIComponent(j.name)}&year=${y-5}-${y}`); if (q===ampla) amplaN=r.data.length; for (const d of r.data){ const kk=(d.doi||d.title||'').toLowerCase(); if (kk && !seen.has(kk)){ seen.add(kk); rs.data.push(d); } } }
       catch(e){ falhou=e.message; }
       await sleep(1100);
     }
     rs.total=rs.data.length;
     if (!rs.data.length && falhou) return {...base, status:'sem_dados', justificativa:'Não foi possível consultar os artigos da revista: '+falhou, sugestao:''};
+    if (!rs.data.length && amplaN===0) return {...base, status:'sem_dados', justificativa:`Nenhum artigo de ${j.name} dos últimos 5 anos apareceu nem na busca ampla (objeto + contexto). A revista provavelmente não está indexada com esse nome no Semantic Scholar, ou publica pouco sobre o tema.`, sugestao:'Procure a revista em semanticscholar.org e use o nome exatamente como aparece lá; se não estiver indexada, avalie o alinhamento pela página de escopo.', venueN:0};
     if (rs.data.length<3) return {...base, status:'sem_dados', justificativa:`Só ${rs.data.length} artigo(s) de ${j.name} dos últimos 5 anos apareceram com os termos das consultas: amostra insuficiente para avaliar o alinhamento.`, sugestao:'Confira se o nome da revista está exato (como aparece no Semantic Scholar) ou amplie as consultas. Enquanto isso, avalie o alinhamento pela página de escopo da revista.', venueN:rs.data.length, venueRefs:rs.data.map(r=>({title:r.title, year:r.year, doi:r.doi}))};
     const ev=rs.data.slice(0,10).map((r,i)=>({code:'J'+(i+1), r}));
     const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"ids": códigos J… dos artigos da revista mais próximos do item.', user:`REVISTA: ${j.name}\nITEM:\n${text}\n\nARTIGOS RECENTES DA REVISTA COM TERMOS PRÓXIMOS (${rs.total} encontrados):\n`+ev.map(x=>`${x.code}: ${x.r.title} (${x.r.year||''}). ${(x.r.abstract||'').slice(0,300)}`).join('\n'), schema:cardSchema(false)}, o=>STATUS[o.status]?null:'status');
@@ -1029,7 +1058,10 @@ async function evalCriterion(p, key, c, text, A, evid){
   if (c.novelty){ const ja=A.top.filter(t=>t.classe==='ja_responde').length;   // o status da novidade vem do índice e da contagem, não da opinião do modelo
     status = A.novelty==null || A.onTopic<Math.min(10, Math.ceil(A.top.length/2)) ? 'sem_dados' : (ja>=3 || A.novelty<40) ? 'nao_atende' : (ja>=1 || A.novelty<70) ? 'parcial' : 'atende'; }
   const dec=t=>decode(t, c=>m.has(c)?recById(p,m.get(c)):null);
-  return {...base, ...o, justificativa:dec(o.justificativa), sugestao:dec(o.sugestao), status, ids:(o.ids||[]).filter(x=>m.has(x)).map(x=>m.get(x))};
+  let just=dec(o.justificativa);
+  if (c.novelty){ const low=(A.concepts||[]).filter(b=>['objeto','fator','mecanismo'].includes(b.papel) && b.of && b.n/b.of<0.2);
+    if (low.length && status!=='nao_atende'){ status='inconclusivo'; just=`Inconclusiva por cobertura baixa de ${low.map(b=>`"${b.rotulo}" (${b.n}/${b.of} artigos)`).join(', ')}: o índice ${A.novelty} foi medido contra literatura que não trata desse(s) conceito(s). `+just; } }
+  return {...base, ...o, justificativa:just, sugestao:dec(o.sugestao), status, ids:(o.ids||[]).filter(x=>m.has(x)).map(x=>m.get(x))};
 }
 ACTIONS.analyze = el => analyzeItem(cur(), el.dataset.k);
 
@@ -1071,6 +1103,7 @@ function renderAnalysis(p, key, A, stale){
       <div class="small" style="margin-top:4px">${esc(c.justificativa||'')}</div>
       ${c.sugestao?`<div class="small" style="margin-top:4px"><b>Onde melhorar:</b> ${esc(c.sugestao)}</div>`:''}
       ${c.trecho?`<div class="quote small">“${esc(c.trecho)}” ${c.trechoOK?'':'<span class="pill bad">trecho não encontrado no item</span>'}</div>`:''}
+      ${c.contestadas?.length?`<div class="small"><span class="pill bad">afirmação contestada</span> O item já traz: ${c.contestadas.map(x=>`${esc(x.falta)}${x.trecho?` (“${esc(x.trecho)}”)`:''}`).join('; ')}. Desconsidere essa parte da avaliação.</div>`:''}
       ${refs.length?`<div class="small muted">Evidência: ${refs.join('; ')}</div>`:''}
       ${c.venueRefs?.length?`<div class="small muted">Na revista (${c.venueN} com termos próximos): ${c.venueRefs.map(r=>r.doi?`<a href="https://doi.org/${esc(r.doi)}" target="_blank" rel="noopener">${esc(r.title)}</a>`:esc(r.title)).join('; ')}</div>`:''}</div>`; };
   const pill=cl=>cl==='ja_responde'?'<span class="pill bad">já responde</span>':cl==='em_parte'?'<span class="pill warn">em parte</span>':cl==='fora_do_tema'?'<span class="pill">fora do tema</span>':'<span class="pill">não responde</span>';
@@ -1081,7 +1114,7 @@ function renderAnalysis(p, key, A, stale){
     <div style="margin:8px 0"><span class="kpi"><b>${A.novelty??'—'}</b><span class="small muted">índice de novidade (0–100)</span></span><span class="kpi"><b>${A.top.length}</b><span class="small muted">artigos lidos${A.foraN!=null?` (${A.onTopic} do tema, ${A.foraN} fora)`:''}</span></span><span class="kpi"><b>${A.corpusN}</b><span class="small muted">no corpus com resumo</span></span><span class="kpi"><b>${A.totals.reduce((s,x)=>s+(x.total||0),0)}</b><span class="small muted">resultados das buscas</span></span>${A.dur?`<span class="kpi"><b>${fmtDur(A.dur)}</b><span class="small muted">duração da análise</span></span>`:''}</div>
     ${A.scope?`<p class="small muted">Artigos ordenados: ${esc(A.scope)}.</p>`:''}
     <table class="small" style="max-width:520px"><tr><th>Entre os mais próximos</th><th>Do tema</th><th>Fora do tema</th><th>Já respondem</th><th>Em parte</th><th>Índice</th></tr>${A.sat.map(s=>`<tr><td>${s.n}</td><td>${s.on??s.n}</td><td>${s.fora??'—'}</td><td>${s.ja}</td><td>${s.pa}</td><td>${s.idx??'—'}</td></tr>`).join('')}</table>
-    <p class="small muted">Novidade: atende com índice ≥ 70 e nenhum artigo que já responde; parcial se houver 1 ou 2 que já respondem ou índice entre 40 e 69; não atende com 3 ou mais, ou índice abaixo de 40. Índice = 100 × (1 − (já respondem + ½ em parte) ÷ artigos do tema lidos); os artigos fora do tema não entram na conta. Com menos de 10 artigos do tema (ou menos da metade dos lidos), a novidade fica sem dados. Mede a sobreposição com os artigos mais próximos que as buscas encontraram; depende das consultas e da cobertura da base. ${A.saturou?'Saturação: nenhum artigo que já responde no último terço da lista.':''}</p></div>
+    <p class="small muted">Novidade: inconclusiva quando objeto, fator ou mecanismo aparecem em menos de 20% dos artigos lidos (salvo 3 ou mais que já respondem); atende com índice ≥ 70 e nenhum artigo que já responde; parcial se houver 1 ou 2 que já respondem ou índice entre 40 e 69; não atende com 3 ou mais, ou índice abaixo de 40. Índice = 100 × (1 − (já respondem + ½ em parte) ÷ artigos do tema lidos); os artigos fora do tema não entram na conta. Com menos de 10 artigos do tema (ou menos da metade dos lidos), a novidade fica sem dados. Mede a sobreposição com os artigos mais próximos que as buscas encontraram; depende das consultas e da cobertura da base. ${A.saturou?'Saturação: nenhum artigo que já responde no último terço da lista.':''}</p></div>
   ${A.concepts?.some(b=>b.of)?`<div class="card"><h2>Cobertura dos conceitos</h2><p class="small muted">Quantos dos artigos lidos citam ao menos um termo de cada bloco no título ou no resumo (contagem direta, sem IA). Cobertura baixa num conceito central significa que a novidade foi medida contra literatura que não trata dele.</p>
     <table class="small"><tr><th>Papel</th><th>Conceito</th><th>Em consultas</th><th>Artigos lidos que citam</th><th>Entre os do tema</th></tr>${A.concepts.map(b=>{ const pc=b.of?Math.round(100*b.n/b.of):0; return `<tr><td>${esc(PAPEL[b.papel]||b.papel)}</td><td>${esc(b.rotulo)}<div class="muted">${esc(b.terms.join(' | '))}</div></td><td>${b.inQ}</td><td><b>${b.n}/${b.of}</b> (${pc}%) ${pc<20&&['objeto','fator','mecanismo'].includes(b.papel)?'<span class="pill warn">baixa</span>':''}</td><td>${b.nOn}/${b.ofOn}</td></tr>`; }).join('')}</table></div>`:''}
   <div class="card"><h2>Critérios</h2>${A.criteria.map(card).join('')}</div>
@@ -1261,6 +1294,7 @@ function analysisModel(p, key, A){
   for (const c of A.criteria){
     P(`${c.t} — ${STATUS[c.status]?.[1]||c.status}${c.id==='novidade'&&A.novelty!=null?` (índice ${A.novelty})`:''}`, true);
     if (c.justificativa) P(c.justificativa); if (c.sugestao) P('Onde melhorar: '+c.sugestao);
+    if (c.contestadas?.length) P('Afirmação contestada (verificada no texto): o item já traz '+c.contestadas.map(x=>x.falta+(x.trecho?` (“${x.trecho}”)`:'')).join('; ')+'. Desconsidere essa parte da avaliação.');
     if (c.trecho) P(`Trecho do item: “${c.trecho}”${c.trechoOK?'':' (não encontrado no item)'}`);
     const refs=(c.ids||[]).map(id=>refFull(recById(p,id))).filter(Boolean); if (refs.length){ P('Evidência:'); L(refs); }
     if (c.venueRefs?.length){ P(`Artigos da revista com termos próximos (${c.venueN}):`); L(c.venueRefs.map(r=>`${r.title} (${r.year||'s.d.'})${r.doi?' https://doi.org/'+r.doi:''}`)); }
