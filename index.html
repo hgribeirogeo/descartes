@@ -99,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.2 — núcleo ================= */
-const VERSION = '0.2.3';
+const VERSION = '0.2.4';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -137,7 +137,7 @@ const DB = {
 /* ---------- Estado ---------- */
 const DEFAULT_CONFIG = {
   provider:'ollama', ollamaBase:'http://localhost:11434', ollamaModel:'qwen3:14b', embedModel:'qwen3-embedding:0.6b',
-  allowOpenRouter:false, openrouterKey:'', openrouterModel:'', openalexKey:'', email:'', temperature:0.2,
+  openalexKey:'', email:'', temperature:0.2,
   gistId:'', githubToken:'', k:100, perQuery:300,
 };
 const S = { config:{...DEFAULT_CONFIG}, projects:[], programs:[], catalog:[], currentId:null, view:'pergunta', litTab:'fontes', busy:{} };
@@ -212,7 +212,7 @@ ACTIONS.deleteProject = async () => { const p=cur(); if(!confirm(`Excluir o proj
 /* ---------- Inicialização e migração da v0.1 ---------- */
 async function boot(){
   await DB.open();
-  const cfg = await DB.get('kv','config'); if (cfg) S.config = {...DEFAULT_CONFIG, ...cfg};
+  const cfg = await DB.get('kv','config'); if (cfg){ S.config = {...DEFAULT_CONFIG, ...cfg}; if (['allowOpenRouter','openrouterKey','openrouterModel'].some(k=>k in S.config)){ for (const k of ['allowOpenRouter','openrouterKey','openrouterModel']) delete S.config[k]; await saveConfig(); } }
   S.projects = await DB.all('projects'); for (const p of S.projects) migrate(p);
   S.programs = (await DB.get('kv','programs')) || [];
   S.catalog = (await DB.get('kv','catalog')) || [];
@@ -246,7 +246,6 @@ const LLM = {
   async checkStatus(){
     const el=$('#llmStatus'); const up = await LLM.ollamaUp();
     if (up){ LLM.online=true; LLM.provider='ollama'; el.className='pill ok'; el.textContent='IA: Qwen local'; }
-    else if (S.config.allowOpenRouter && S.config.openrouterKey){ LLM.online=true; LLM.provider='openrouter'; el.className='pill warn'; el.textContent='IA: OpenRouter'; }
     else { LLM.online=false; LLM.provider=null; el.className='pill'; el.textContent='IA: offline (fila)'; }
     return LLM.online;
   },
@@ -256,18 +255,12 @@ const LLM = {
     if (!LLM.online) await LLM.checkStatus();
     if (!LLM.online) throw new Error('IA indisponível');
     const temp = temperature ?? S.config.temperature;
-    if (LLM.provider==='ollama'){
+    {
       const r = await fetch(S.config.ollamaBase.replace(/\/$/,'')+'/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({model:S.config.ollamaModel, stream:false, think:false, format:schema||'json', options:{temperature:temp, num_ctx:8192},
           messages:[{role:'system',content:system},{role:'user',content:user}]})});
       if (!r.ok) throw new Error('Ollama: HTTP '+r.status+' '+(await r.text()).slice(0,200));
       const j = await r.json(); return LLM.parseJSON(j.message?.content);
-    } else {
-      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.config.openrouterKey,'X-Title':'Descartes'},
-        body:JSON.stringify({model:S.config.openrouterModel, temperature:temp, response_format:{type:'json_object'},
-          messages:[{role:'system',content:system+'\nResponda somente com JSON válido.'},{role:'user',content:user}]})});
-      if (!r.ok) throw new Error('OpenRouter: HTTP '+r.status+' '+(await r.text()).slice(0,200));
-      const j = await r.json(); return LLM.parseJSON(j.choices?.[0]?.message?.content);
     }
   },
   /* Chamada com validação e até 2 novas tentativas */
@@ -793,7 +786,7 @@ async function analyzeItem(p, key){
     let queries = (it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
     if (!queries.length){
       setStep(key,'Gerando consultas de busca…');
-      const cal=await calibrateQueries(key, text, await generateQueries(key, text), m=>setStep(key,m)); storeQueries(it, cal); queries=cal.map(x=>x.consulta);
+      const B=await buildQueries(key, text, m=>setStep(key,m)); it.concepts=B.blocks; storeQueries(it, B.list); queries=B.list.map(x=>x.consulta);
     }
     A.queries=queries;
     /* 2. Busca e acúmulo no corpus do projeto */
@@ -872,20 +865,52 @@ async function analyzeItem(p, key){
   }catch(e){ if (e.message!=='interrompida') toast('Análise: '+e.message, 8000); else toast('Análise interrompida.'); }
   delete S.busy['an_'+key]; touch(p); render();
 }
-const QUERY_RULES = `Regras de construção (API bulk do Semantic Scholar, busca no título e no resumo):
-- Pense em BLOCOS de conceitos. Dentro de um bloco, sinônimos e variantes ligados por | entre parênteses. Entre blocos, use +.
-- Use de 2 a 4 blocos por consulta. Cada bloco a mais estreita muito a busca.
-- Aspas só para termos consagrados de 2 ou 3 palavras (ex.: "change detection", "burned area"). Nunca ponha uma frase descritiva longa entre aspas.
-- Evite exclusões com -. Use no máximo uma, e só se houver um sentido ambíguo claro.
-- Termos em inglês. Inclua variantes de grafia e sinônimos técnicos.
-- Exemplo de forma (outro tema): (glacier | "ice cover") + (retreat | loss | "area change") + (Landsat | Sentinel-2 | "remote sensing") + (Andes | tropical)`;
-async function generateQueries(key, text){
-  const q=await LLM.chatValid({system:`Você monta consultas de busca bibliográfica. Gere de 2 a 3 consultas complementares para o item: cada uma cobre um ângulo (fenômeno, método ou dado, contexto). ${QUERY_RULES}\nEm "objetivo", diga em português, em até 15 palavras, que parte do item a consulta cobre.`,
-    user:`ITEM (${ITEMS[key].name}):\n${text}`, schema:qSchema}, o=>Array.isArray(o.consultas)&&o.consultas.length&&o.consultas.every(x=>x.consulta)?null:'consultas');
-  return q.consultas.slice(0,3).map(x=>({consulta:x.consulta.trim(), objetivo:(x.objetivo||'').trim()})).filter(x=>x.consulta);
-}
-const qSchema={type:'object',required:['consultas'],properties:{consultas:{type:'array',items:{type:'object',required:['consulta','objetivo'],properties:{consulta:{type:'string'},objetivo:{type:'string'}}}}}};
+/* ---------- Consultas: o Qwen extrai os conceitos; o código monta e calibra ---------- */
 const Q_MIN=20, Q_MAX=5000;
+const conceptSchema={type:'object',required:['blocos'],properties:{blocos:{type:'array',items:{type:'object',required:['papel','rotulo','termos'],properties:{papel:{type:'string',enum:['objeto','fator','mecanismo','metodo','contexto']},rotulo:{type:'string'},termos:{type:'array',items:{type:'string'}}}}}}};
+const CONCEPT_PROMPT=`Você prepara a busca bibliográfica de um item de pesquisa. Não escreva consultas: extraia os CONCEITOS que um artigo relevante precisa conter.
+Devolva de 3 a 5 blocos, do mais essencial ao menos essencial:
+- objeto: o que é estudado;
+- fator: o que atua sobre o objeto;
+- mecanismo: o efeito ou problema que o item investiga, traduzido para o vocabulário técnico da área (ex.: "mascarar o resultado" de um monitoramento por satélite = commission error, false change, misclassification);
+- metodo: dado ou técnica, só se o item citar ou pressupor;
+- contexto: lugar, bioma ou regime legal.
+Em cada bloco, de 2 a 6 termos em inglês, de 1 a 3 palavras cada, que apareçam de fato em títulos e resumos científicos. Prefira o termo mais usado na literatura do tema, não a tradução literal (ex.: em savanas se escreve fire e burned area, raramente wildfire). Nomes de biomas e regiões podem ficar no original. Nunca escreva frases descritivas. "rotulo" é o nome curto do bloco em português.`;
+const PAPEL={objeto:'objeto', fator:'fator', mecanismo:'mecanismo', metodo:'método', contexto:'contexto'};
+function cleanTerm(t){ t=String(t||'').replace(/["“”()|+]/g,' ').replace(/(^|\s)-+/g,' ').replace(/\s+/g,' ').trim(); if(!t) return ''; const n=t.split(' ').length; return n>3?'':n>1?`"${t}"`:t; }
+const blockStr = b => b.terms.length>1?`(${b.terms.join(' | ')})`:b.terms[0];
+async function extractConcepts(key, text){
+  const o=await LLM.chatValid({system:CONCEPT_PROMPT, user:`ITEM (${ITEMS[key].name}):\n${text}`, schema:conceptSchema}, o=>Array.isArray(o.blocos)&&o.blocos.length>=2?null:'blocos');
+  const seen=new Set(), blocks=[];
+  for (const b of o.blocos){
+    const terms=(b.termos||[]).map(cleanTerm).filter(t=>{ const k=t.toLowerCase(); if(!t||seen.has(k)) return false; seen.add(k); return true; }).slice(0,6);
+    if (terms.length) blocks.push({papel:b.papel||'', rotulo:(b.rotulo||b.papel||'').trim(), terms});
+  }
+  if (blocks.length<2) throw new Error('O Qwen não extraiu conceitos suficientes do item. Reescreva o item com mais detalhe ou escreva as consultas à mão.');
+  return blocks.slice(0,5);
+}
+/* Combinações: todos os blocos e "todos menos um" (o objeto fica sempre). Poucos resultados: retira o bloco menos essencial. */
+async function buildQueries(key, text, onMsg){
+  onMsg?.('Qwen extraindo os conceitos do item…');
+  const blocks=await extractConcepts(key, text); const cache=new Map();
+  const test=async ix=>{ const q=ix.map(i=>blockStr(blocks[i])).join(' + ');
+    if (!cache.has(q)){ onMsg?.(`Testando combinações de conceitos (${cache.size+1})…`); cache.set(q, await testQuery(q)); await sleep(1100); }
+    return {...cache.get(q), q, ix}; };
+  const all=[...blocks.keys()]; const combos=[all, ...all.slice(1).map(i=>all.filter(j=>j!==i))].filter(c=>c.length>=2);
+  const out=[];
+  for (const c of combos){
+    let ix=[...c], antes=[], r=await test(ix);
+    while (!r.erro && r.total<Q_MIN && ix.length>2){ antes.push({q:r.q,total:r.total}); ix=ix.slice(0,-1); r=await test(ix); }
+    if (!out.some(x=>x.q===r.q)) out.push({...r, antes});
+  }
+  const ok=x=>!x.erro && x.total>=Q_MIN && x.total<=Q_MAX;
+  let pool=out.filter(ok).sort((a,b)=>b.ix.length-a.ix.length || a.total-b.total);
+  if (!pool.length) pool=out.filter(x=>!x.erro).sort((a,b)=>Math.abs(Math.log((a.total||1)/300))-Math.abs(Math.log((b.total||1)/300)));
+  const chosen=pool.slice(0,3);
+  if (!chosen.length) throw new Error('O Semantic Scholar não respondeu aos testes. Tente de novo em alguns minutos.');
+  return {blocks, list:chosen.map(x=>({consulta:x.q, total:x.total, top:x.top||[], erro:x.erro, antes:x.antes.length?x.antes:undefined,
+    objetivo:'Cobre: '+x.ix.map(i=>blocks[i].rotulo).join(' · ')+(x.ix.length<blocks.length?' (sem: '+all.filter(i=>!x.ix.includes(i)).map(i=>blocks[i].rotulo).join(', ')+')':'')}))};
+}
 async function testQuery(q){
   try{ const j=await s2Fetch(`https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodeURIComponent(q)}&fields=title,year,citationCount&sort=citationCount:desc`);
     return {q, total:j.total??(j.data||[]).length, top:(j.data||[]).slice(0,5).map(d=>({title:d.title, year:d.year, c:d.citationCount}))}; }
@@ -897,21 +922,6 @@ function lintQuery(q){
   if (q.split('+').length>5) w.push('blocos demais (+)');
   return w;
 }
-/* Testa as consultas e devolve ao Qwen as que ficaram fora da faixa, com a contagem, por até 2 rodadas */
-async function calibrateQueries(key, text, qs, onMsg){
-  let list=qs.map(x=>({...x}));
-  for (let round=0; round<3; round++){
-    for (const x of list){ if (x.tested) continue; onMsg?.(`Testando consultas (rodada ${round+1})…`); Object.assign(x, await testQuery(x.consulta)); x.tested=true; await sleep(1100); }
-    const bad=list.filter(x=>!x.erro && (x.total<Q_MIN || x.total>Q_MAX));
-    if (!bad.length || round===2) break;
-    onMsg?.(`Ajustando ${bad.length} consulta(s) fora da faixa…`);
-    const o=await LLM.chatValid({system:`Você ajusta consultas de busca bibliográfica que trouxeram resultados demais ou de menos. Para cada consulta, devolva uma versão corrigida que mantenha o mesmo ângulo. Poucos resultados: tire aspas de frases, acrescente sinônimos com |, remova um bloco ou uma exclusão. Resultados demais: acrescente um bloco que delimite o tema. Faixa desejada: entre ${Q_MIN} e ${Q_MAX} artigos. ${QUERY_RULES}`,
-      user:`ITEM:\n${text}\n\nCONSULTAS E CONTAGENS:\n`+bad.map((x,i)=>`${i+1}. ${x.consulta} → ${x.total} artigos (${x.total<Q_MIN?'poucos':'demais'})`).join('\n')+`\n\nDevolva ${bad.length} consulta(s), na mesma ordem.`, schema:qSchema},
-      o=>Array.isArray(o.consultas)&&o.consultas.length===bad.length?null:'quantidade');
-    bad.forEach((x,i)=>{ const n=o.consultas[i]; x.antes=(x.antes||[]).concat([{q:x.consulta,total:x.total}]); x.consulta=n.consulta.trim(); x.objetivo=n.objetivo||x.objetivo; x.tested=false; });
-  }
-  return list;
-}
 function storeQueries(it, list){
   const seen=new Set(); list=list.filter(x=>{ const k=normTxt(x.consulta); if(seen.has(k)) return false; seen.add(k); return true; });
   it.queries=list.map(x=>x.consulta).join('\n'); it.queryNotes=Object.fromEntries(list.map(x=>[x.consulta,x.objetivo]));
@@ -921,8 +931,8 @@ ACTIONS.suggestQueries = async el => {
   const p=cur(), key=el.dataset.k, it=p.items[key], text=itemText(p,key);
   if (text.length<20) return toast('Escreva o item antes.');
   if (it.queries?.trim() && !confirm('Substituir as consultas atuais pelas sugeridas?')) return;
-  S.busy['q_'+key]='Qwen sugerindo consultas…'; render();
-  try{ const qs=await generateQueries(key, text); const cal=await calibrateQueries(key, text, qs, m=>{ S.busy['q_'+key]=m; render(); }); storeQueries(it, cal); touch(p); }
+  S.busy['q_'+key]='Qwen extraindo os conceitos do item…'; render();
+  try{ const B=await buildQueries(key, text, m=>{ S.busy['q_'+key]=m; render(); }); it.concepts=B.blocks; storeQueries(it, B.list); touch(p); }
   catch(e){ toast('Sugestão: '+e.message, 7000); }
   delete S.busy['q_'+key]; render();
 };
@@ -940,6 +950,7 @@ function renderQueries(p, key){
   const flag=t=> t>Q_MAX?'<span class="pill warn">ampla demais</span>':t<Q_MIN?'<span class="pill warn">restrita demais</span>':'<span class="pill ok">bom tamanho</span>';
   return `<div class="crit" style="margin-top:10px"><div class="row"><b>1. Consultas de busca</b><span class="small muted">uma por linha · "frase exata", + (e), | (ou), - (excluir), parênteses</span></div>
     <textarea id="it_${key}_q" rows="3" data-bind="items.${key}.queries" data-rerender="1" placeholder="Clique em Sugerir para o Qwen propor a partir do seu texto">${esc(it.queries||'')}</textarea>
+    ${it.concepts?.length?`<div class="small" style="margin:4px 0"><b>Conceitos extraídos</b> (do mais ao menos essencial):${it.concepts.map(b=>`<div><span class="pill">${esc(PAPEL[b.papel]||b.papel)}</span> ${esc(b.rotulo)}: <code>${esc(b.terms.join(' | '))}</code></div>`).join('')}</div>`:''}
     ${qs.some(q=>notes[q])?`<ul class="small" style="margin:4px 0">${qs.filter(q=>notes[q]).map(q=>`<li><code>${esc(q)}</code> — ${esc(notes[q])}</li>`).join('')}</ul>`:''}
     <div class="row" style="margin-top:6px">${busy?`<span class="pill warn">${esc(busy)}</span>`:`<button class="b sec" data-act="suggestQueries" data-k="${key}" ${LLM.online?'':'disabled'}>Sugerir consultas</button><button class="b sec" data-act="previewQueries" data-k="${key}" ${qs.length?'':'disabled'}>Testar consultas</button>`}</div>
     ${qs.map(q=>({q,w:lintQuery(q)})).filter(x=>x.w.length).map(x=>`<div class="small"><span class="pill warn">revise</span> <code>${esc(x.q)}</code>: ${esc(x.w.join('; '))}</div>`).join('')}
@@ -1081,14 +1092,14 @@ document.addEventListener('input', ev => { if (ev.target.dataset.bindp?.startsWi
 
 /* ---------- Configurações ---------- */
 function renderConfig(){
-  const c=S.config; const inp=(k,label,type='text',ph='')=>`<div class="col" style="margin:6px 0"><label>${label}</label><input type="${type}" data-cfg="${k}" value="${esc(c[k]??'')}" placeholder="${esc(ph)}"></div>`;
+  const c=S.config; const inp=(k,label,type='text',ph='')=>`<div class="col" style="margin:6px 0"><label>${label}</label><input type="${type==='secret'?'text':type}" data-cfg="${k}" value="${esc(c[k]??'')}" placeholder="${esc(ph)}"${type==='secret'?' autocomplete="off" spellcheck="false" data-lpignore="true" style="-webkit-text-security:disc"':''}></div>`;
   return `<div class="card"><h2>IA local (Ollama)</h2>${inp('ollamaBase','Endereço do Ollama','url')}${inp('ollamaModel','Modelo','text','qwen3:14b')}${inp('embedModel','Modelo de embeddings','text','qwen3-embedding:0.6b')}
     <button class="b sec" data-act="testLLM">Testar conexão</button></div>
   <div class="card"><h2>Análise</h2>${inp('k','Artigos lidos por análise (mais próximos do item)','number')}${inp('perQuery','Máximo de registros trazidos por consulta','number')}
     <p class="small muted">Com 100 artigos a leitura leva cerca de 7–8 min no seu PC. Artigos já lidos para a mesma versão do item não são relidos.</p></div>
   <div class="card"><h2>Sincronização (mesmo Gist do LabResearch)</h2><p class="small muted">O Descartes grava só no arquivo <code>descartes.json</code> do Gist; o arquivo do LabResearch não é alterado. O catálogo de revistas é lido do LabResearch.</p>
-    ${inp('gistId','ID do Gist','text')}${inp('githubToken','Token do GitHub (fica só neste aparelho)','password')}
-    <p class="small muted">Use um token <i>fine-grained</i> com permissão apenas para Gists. O token fica só neste aparelho e é enviado somente à API do GitHub.</p>
+    ${inp('gistId','ID do Gist (o mesmo que aparece nas Configurações do LabResearch)','text')}${inp('githubToken','Token do GitHub (fica só neste aparelho)','secret','ghp_...')}
+    <p class="small muted">Use um token clássico com o escopo <b>gist</b> (pode ser o mesmo do LabResearch). Ao colar, esvazie o campo antes. O token fica só neste aparelho e é enviado somente à API do GitHub.</p>
     <div class="row"><button class="b" data-act="syncNow">Sincronizar agora</button><span class="small">${esc(Sync.status)}</span></div>
     <p class="small">Catálogo de revistas: <b>${S.catalog.length}</b> revistas.</p></div>
   <div class="card"><h2>Backup</h2><div class="row"><button class="b sec" data-act="exportBackup">Exportar backup (JSON)</button><input type="file" id="bkFile" accept=".json"><button class="b sec" data-act="importBackup">Importar backup</button></div>
@@ -1140,7 +1151,7 @@ const Sync = {
   setStatus(s){ this.status=s; const el=$('#syncStatus'); if(el){ el.textContent=s; el.dataset.act='syncNow'; el.style.cursor='pointer'; } },
   init(){ if (this.ok()) this.sync(); else this.setStatus('local'); },
   async gh(method, body){ const r=await fetch(`https://api.github.com/gists/${S.config.gistId.trim()}`,{method, headers:{Authorization:'Bearer '+S.config.githubToken.trim(), Accept:'application/vnd.github+json', ...(body?{'Content-Type':'application/json'}:{})}, body:body?JSON.stringify(body):undefined});
-    if (!r.ok) throw new Error('GitHub HTTP '+r.status); return r.json(); },
+    if (!r.ok) throw new Error(({401:'token inválido, expirado ou revogado (HTTP 401). Gere um token clássico com escopo gist e cole de novo',403:'o token não tem permissão para Gists ou o limite de uso foi atingido (HTTP 403)',404:'Gist não encontrado (HTTP 404). Confira o ID: use o mesmo do LabResearch'})[r.status]||('GitHub HTTP '+r.status)); return r.json(); },
   async fileContent(f){ if (!f) return null; if (f.truncated){ const r=await fetch(f.raw_url); return r.ok? r.text() : null; } return f.content; },
   mergeProjects(list){ let n=0; for (const rp of list){ migrate(rp); const lp=S.projects.find(p=>p.id===rp.id); if(!lp){ S.projects.push(rp); n++; } else if ((rp.updatedAt||'')>(lp.updatedAt||'')){ Object.assign(lp,rp); n++; } } return n; },
   mergePrograms(list){ for (const rp of list){ const lp=S.programs.find(p=>p.id===rp.id); if(!lp) S.programs.push(rp); else if ((rp.updatedAt||'')>(lp.updatedAt||'')) Object.assign(lp,rp); } },
@@ -1155,11 +1166,12 @@ const Sync = {
       for (const p of S.projects) await DB.put('projects',p); await DB.put('kv',S.programs,'programs'); await DB.put('kv',deleted,'deleted');
       // catálogo: arquivos do LabResearch no mesmo Gist
       const js=[]; for (const [name,f] of Object.entries(g.files||{})){ if (name==='descartes.json' || !/\.json$/i.test(name)) continue; try{ findJournals(JSON.parse(await this.fileContent(f)), js); }catch(e){} }
+      if (!js.length && !mine) throw new Error('este Gist não é o do LabResearch (não tem o catálogo de revistas nem dados do Descartes). Confira o ID; nada foi gravado nele');
       if (js.length) await setCatalog(js);
       await this.gh('PATCH', {files:{'descartes.json':{content:JSON.stringify({app:'descartes', version:VERSION, at:nowISO(), projects:S.projects, programs:S.programs, deleted})}}});
       if (!S.projects.find(p=>p.id===S.currentId)) S.currentId=S.projects[0]?.id||null;
       this.setStatus('Gist: '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})); render();
-    }catch(e){ this.setStatus('Gist: erro'); toast('Sincronização: '+e.message, 6000); }
+    }catch(e){ this.setStatus('Gist: erro — '+e.message.split(' (')[0]); toast('Sincronização: '+e.message, 9000); }
     this.running=false;
   },
   schedule(){ if (!this.ok()) return; clearTimeout(this.timer); this.timer=setTimeout(()=>this.sync(), 10000); },
