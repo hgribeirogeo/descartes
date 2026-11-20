@@ -99,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.2 — núcleo ================= */
-const VERSION = '0.2.6';
+const VERSION = '0.2.8';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -138,7 +138,7 @@ const DB = {
 const DEFAULT_CONFIG = {
   provider:'ollama', ollamaBase:'http://localhost:11434', ollamaModel:'qwen3:14b', embedModel:'qwen3-embedding:0.6b',
   openalexKey:'', email:'', temperature:0.2,
-  gistId:'', githubToken:'', k:100, perQuery:300,
+  gistId:'', githubToken:'', k:100, perQuery:300, rankScope:'consultas',
 };
 const S = { config:{...DEFAULT_CONFIG}, projects:[], programs:[], catalog:[], currentId:null, view:'pergunta', litTab:'fontes', busy:{} };
 const cur = () => S.projects.find(p => p.id === S.currentId) || null;
@@ -289,7 +289,7 @@ const normTitle = t => normTxt(t).replace(/[^a-z0-9à-ú]+/g,'');
 function gapDeclared(p){ const g=p.lit.gap; return !!g.declared && g.declaredHash===hashStr(g.claim||''); }
 
 /* ---------- Registro e deduplicação ---------- */
-function addRecords(p, recs, sourceName){
+function addRecords(p, recs, sourceName, hits){
   let novos=0; const idxDoi={}, idxT={};
   for (const r of p.lit.records){ if(r.doi) idxDoi[r.doi]=r; idxT[normTitle(r.title)+'|'+(r.year||'')]=r; }
   for (const raw of recs){
@@ -298,9 +298,9 @@ function addRecords(p, recs, sourceName){
       authors:raw.authors||'', venue:raw.venue||'', openalexId:raw.openalexId||'', s2Id:raw.s2Id||'', refs:raw.refs||[], citedBy:raw.citedBy||0, link:raw.link||''};
     const ex = (r.doi && idxDoi[r.doi]) || idxT[normTitle(r.title)+'|'+(r.year||'')];
     if (ex){ if(!ex.abstract && r.abstract){ ex.abstract=r.abstract; ex.sem_resumo=false; } if(!ex.openalexId && r.openalexId){ ex.openalexId=r.openalexId; ex.refs=r.refs; } if(!ex.s2Id && r.s2Id) ex.s2Id=r.s2Id;
-      ex.citedBy=Math.max(ex.citedBy||0, r.citedBy||0); if(!ex.sources.includes(sourceName)) ex.sources.push(sourceName); continue; }
+      ex.citedBy=Math.max(ex.citedBy||0, r.citedBy||0); if(!ex.sources.includes(sourceName)) ex.sources.push(sourceName); hits?.add(ex.id); continue; }
     const rec = {id:uid('r'), ...r, sources:[sourceName], sem_resumo:!r.abstract, addedAt:nowISO()};
-    p.lit.records.push(rec); novos++; if(rec.doi) idxDoi[rec.doi]=rec; idxT[normTitle(rec.title)+'|'+(rec.year||'')]=rec;
+    p.lit.records.push(rec); hits?.add(rec.id); novos++; if(rec.doi) idxDoi[rec.doi]=rec; idxT[normTitle(rec.title)+'|'+(rec.year||'')]=rec;
   }
   return novos;
 }
@@ -781,7 +781,7 @@ async function analyzeItem(p, key){
   S.busy['an_'+key]={msg:'Preparando…'}; render();
   if (!(await LLM.checkStatus()) || LLM.provider!=='ollama'){ delete S.busy['an_'+key]; render(); return toast('A análise usa o Qwen e os embeddings no PC: abra o Descartes no computador com o Ollama ligado.', 7000); }
   const k=Math.max(10, Math.min(300, Number(S.config.k)||100)); const per=Math.max(50, Math.min(2000, Number(S.config.perQuery)||300));
-  const A={id:uid('a'), at:nowISO(), textHash:hashStr(text), ck:key+'|'+hashStr(text)+'|c2', model:S.config.ollamaModel, text, k, queries:[], totals:[], criteria:[], summary:[], top:[], warnings:[]};
+  const A={id:uid('a'), at:nowISO(), textHash:hashStr(text), ck:key+'|'+hashStr(text)+'|c3', model:S.config.ollamaModel, text, k, queries:[], totals:[], criteria:[], summary:[], top:[], warnings:[]};
   const t0=Date.now(); S.busy['an_'+key].t0=t0;
   const tick=setInterval(()=>{ const el=document.getElementById('anTimer'); if (el) el.textContent=fmtDur((Date.now()-t0)/1000); }, 1000);
   try{
@@ -789,21 +789,32 @@ async function analyzeItem(p, key){
     let queries = (it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
     if (!queries.length){
       setStep(key,'Gerando consultas de busca…');
-      const B=await buildQueries(key, text, m=>setStep(key,m)); it.concepts=B.blocks; storeQueries(it, B.list); queries=B.list.map(x=>x.consulta);
+      const B=await buildQueries(key, text, m=>setStep(key,m)); it.concepts=B.blocks; it.conceptsHash=A.textHash; storeQueries(it, B.list); queries=B.list.map(x=>x.consulta);
     }
-    A.queries=queries;
+    A.queries=queries; const hits=new Set();
+    /* 1b. Conceitos do item (para medir a cobertura): os mesmos das consultas sugeridas; se você escreveu as consultas, o Qwen extrai agora */
+    if (!it.concepts?.length || it.conceptsHash!==A.textHash){ setStep(key,'Qwen extraindo os conceitos do item para medir a cobertura…');
+      try{ it.concepts=await extractConcepts(key, text); it.conceptsHash=A.textHash; }catch(e){ A.warnings.push('Não foi possível extrair os conceitos do item: a cobertura não foi medida.'); } }
+    if (it.concepts?.length && it.conceptsHash===A.textHash){ A.concepts=it.concepts.map(b=>({...b, terms:[...b.terms]}));
+      for (const b of A.concepts){ b.inQ=queries.filter(q=>blockInText(b,q)).length;
+        if (!b.inQ) A.warnings.push(`O conceito "${b.rotulo}" (${PAPEL[b.papel]||b.papel}) não aparece em nenhuma consulta: a busca não amostrou esse aspecto do item.`); } }
     /* 2. Busca e acúmulo no corpus do projeto */
     for (const [i,q] of queries.entries()){
       if (stopped(key)) throw new Error('interrompida');
       setStep(key,`Buscando no Semantic Scholar (${i+1}/${queries.length})…`);
-      try{ const r=await s2Bulk(q, per); const novos=addRecords(p, r.data, 'Semantic Scholar');
+      try{ const r=await s2Bulk(q, per); const novos=addRecords(p, r.data, 'Semantic Scholar', hits);
         logSearch(p,{fonte:'Semantic Scholar (bulk)', consulta:q, tipo:'termos', n:r.data.length, novos, total:r.total, item:key}); A.totals.push({q, total:r.total, got:r.data.length, novos}); }
       catch(e){ A.warnings.push(`Busca "${q}" falhou: ${e.message}. A análise usa o corpus já existente.`); }
       await sleep(1100);
     }
     /* 3. Embeddings e ordenação por proximidade */
     const E=await getEmb(p); if (E.model!==S.config.embedModel){ E.model=S.config.embedModel; E.vecs={}; }
-    const cand=p.lit.records.filter(r=>r.abstract && r.override!=='excluir');
+    const imported = r => r.sources.some(s=>!['Semantic Scholar','OpenAlex'].includes(s));
+    let cand=p.lit.records.filter(r=>r.abstract && r.override!=='excluir');
+    if (S.config.rankScope!=='corpus'){ const sc=cand.filter(r=>hits.has(r.id)||imported(r));
+      if (sc.length) { A.scope=`resultados das ${queries.length} consultas desta análise + arquivos importados (${sc.length} com resumo, de ${cand.length} no corpus)`; cand=sc; }
+      else { A.scope='todo o corpus (as consultas desta análise não trouxeram artigos com resumo)'; A.warnings.push('As consultas desta análise não trouxeram artigos com resumo: a ordenação usou todo o corpus do projeto.'); } }
+    else A.scope='todo o corpus do projeto, incluindo buscas anteriores';
     const todo=cand.filter(r=>!E.vecs[r.id]);
     for (let i=0;i<todo.length;i+=32){ if (stopped(key)) throw new Error('interrompida');
       setStep(key,'Calculando embeddings…', i, todo.length);
@@ -814,14 +825,14 @@ async function analyzeItem(p, key){
     const top=ranked.slice(0,k); A.corpusN=cand.length; A.semResumo=p.lit.records.filter(r=>!r.abstract).length;
     if (top.length<k) A.warnings.push(`O corpus tem só ${top.length} artigos com resumo; a análise leu todos.`);
     /* 4. Leitura dos k mais próximos (com cache por versão do item) */
-    const ck=A.ck;
+    const ck=A.ck;   // c3: definição corrigida de "fora do tema" 
     for (const [i,x] of top.entries()){
       if (stopped(key)) throw new Error('interrompida');
       setStep(key,`Lendo os artigos mais próximos (${i+1}/${top.length})…`, i, top.length);
       const r=x.r; r.cls ||= {};
       if (!r.cls[ck]){
         const src=r.title+'\n'+r.abstract;
-        const o=await LLM.chatValid({system:`Você compara um artigo científico com um item de pesquisa. Use SOMENTE o título e o resumo. "ja_responde": ${def.cls}; "em_parte": trata do mesmo problema, mas em outro contexto, com outra abordagem ou só em parte; "nao_responde": é do mesmo tema geral do item (mesmo objeto, fator ou contexto), mas não trata do problema que o item investiga; "fora_do_tema": não é do tema do item (outro objeto, outro fenômeno ou outra área), mesmo que compartilhe palavras. "trecho": cópia literal de até 160 caracteres do resumo que justifica. Português.`,
+        const o=await LLM.chatValid({system:`Você compara um artigo científico com um item de pesquisa. Use SOMENTE o título e o resumo. "ja_responde": ${def.cls}; "em_parte": trata do mesmo problema, mas em outro contexto, com outra abordagem ou só em parte; "nao_responde": é do mesmo tema geral do item (mesmo objeto, fator, mecanismo, método ou contexto), mas não trata do problema que o item investiga; "fora_do_tema": é de outra área do conhecimento ou trata de outro fenômeno, sem relação com o problema do item, mesmo que compartilhe palavras. Outra região, bioma, país, período ou sensor NÃO torna um artigo fora do tema: se trata do mesmo problema em outro lugar ou com outro dado, é "em_parte"; se é do mesmo tema geral, é "nao_responde". "trecho": cópia literal de até 160 caracteres do resumo que justifica. Português.`,
           user:`ITEM (${def.name}):\n${text}\n\nTÍTULO: ${r.title}\nRESUMO: ${r.abstract}`, schema:{type:'object',required:['classe','trecho'],properties:{classe:{type:'string',enum:['ja_responde','em_parte','nao_responde','fora_do_tema']},trecho:{type:'string'}}}},
           o=>['ja_responde','em_parte','nao_responde','fora_do_tema'].includes(o.classe)?null:'classe');
         const ok=quoteOK(o.trecho, src);
@@ -839,6 +850,11 @@ async function analyzeItem(p, key){
     if (all.on < Math.min(10, Math.ceil(all.n/2))) A.warnings.push(`Só ${all.on} artigos do tema entre os lidos: amostra pequena para medir a novidade.`);
     const tail=A.top.slice(Math.floor(A.top.length*2/3)); A.saturou = !tail.some(t=>t.classe==='ja_responde');
     if (!A.saturou) A.warnings.push('Ainda aparecem artigos que já respondem ao item no último terço da lista: aumente o número de artigos lidos ou revise as consultas.');
+    /* 5b. Cobertura dos conceitos nos artigos lidos (contagem de termos no título e no resumo; sem IA) */
+    if (A.concepts){ const on=new Set(A.top.filter(t=>t.classe!=='fora_do_tema').map(t=>t.id));
+      for (const b of A.concepts){ const hit=A.top.filter(t=>{ const r=recById(p,t.id); return r && blockInText(b, r.title+' '+(r.abstract||'')); });
+        b.n=hit.length; b.of=A.top.length; b.nOn=hit.filter(t=>on.has(t.id)).length; b.ofOn=on.size;
+        if (['objeto','fator','mecanismo'].includes(b.papel) && b.of && b.n/b.of<0.2) A.warnings.push(`Cobertura baixa: só ${b.n} dos ${b.of} artigos lidos citam "${b.rotulo}" (${PAPEL[b.papel]||b.papel}). Se esse conceito é central no item, o índice de novidade se apoia em literatura que não trata dele; inclua uma consulta que exija esse bloco.`); } }
     /* 6. Cartões por critério (um critério por chamada) */
     const evid = () => { const rel=A.top.filter(t=>t.classe==='ja_responde'||t.classe==='em_parte').slice(0,8); const rest=A.top.filter(t=>t.classe==='nao_responde').slice(0,12-rel.length);
       return [...rel,...rest].map((t,i)=>({code:'A'+(i+1), r:recById(p,t.id), classe:t.classe})); };
@@ -882,16 +898,19 @@ Devolva de 3 a 5 blocos, do mais essencial ao menos essencial:
 - mecanismo: o efeito ou problema que o item investiga, traduzido para o vocabulário técnico da área (ex.: "mascarar o resultado" de um monitoramento por satélite = commission error, false change, misclassification);
 - metodo: dado ou técnica, só se o item citar ou pressupor;
 - contexto: lugar, bioma ou regime legal.
-Em cada bloco, de 2 a 6 termos em inglês, de 1 a 3 palavras cada, que apareçam de fato em títulos e resumos científicos. Prefira o termo mais usado na literatura do tema, não a tradução literal (ex.: em savanas se escreve fire e burned area, raramente wildfire). Nomes de biomas e regiões podem ficar no original. Nunca escreva frases descritivas. "rotulo" é o nome curto do bloco em português.`;
+Cada termo pertence a um só bloco (o que atua sobre o objeto vai em fator, não em objeto). Nunca use anos, períodos ou números como termos: datas não são conceitos. Em cada bloco, de 2 a 6 termos em inglês, de 1 a 3 palavras cada (prefira 1 ou 2), que apareçam de fato em títulos e resumos científicos. Prefira o termo mais usado na literatura do tema, não a tradução literal (ex.: em savanas se escreve fire e burned area, raramente wildfire). Nomes de biomas e regiões podem ficar no original. Nunca escreva frases descritivas. "rotulo" é o nome do conceito em português, em 2 a 4 palavras (ex.: "cicatrizes de queimada"), nunca o nome do papel ("objeto", "fator").`;
+const termRe = t => new RegExp('(^|[^a-z0-9])'+normTxt(t.replace(/"/g,'')).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'($|[^a-z0-9])');
+const blockInText = (b, txt) => { const n=normTxt(txt); return b.terms.some(t=>termRe(t).test(n)); };
 const PAPEL={objeto:'objeto', fator:'fator', mecanismo:'mecanismo', metodo:'método', contexto:'contexto'};
-function cleanTerm(t){ t=String(t||'').replace(/["“”()|+]/g,' ').replace(/(^|\s)-+/g,' ').replace(/\s+/g,' ').trim(); if(!t) return ''; const n=t.split(' ').length; return n>3?'':n>1?`"${t}"`:t; }
+function cleanTerm(t){ t=String(t||'').replace(/["“”()|+]/g,' ').replace(/(^|\s)-+/g,' ').replace(/\s+/g,' ').trim(); if(!t || /^[\d\s.,\/–-]+$/.test(t) || /\b(1[89]|20)\d\d\b/.test(t)) return ''; const n=t.split(' ').length; return n>3?'':n>1?`"${t}"`:t; }
 const blockStr = b => b.terms.length>1?`(${b.terms.join(' | ')})`:b.terms[0];
 async function extractConcepts(key, text){
   const o=await LLM.chatValid({system:CONCEPT_PROMPT, user:`ITEM (${ITEMS[key].name}):\n${text}`, schema:conceptSchema}, o=>Array.isArray(o.blocos)&&o.blocos.length>=2?null:'blocos');
   const seen=new Set(), blocks=[];
   for (const b of o.blocos){
     const terms=(b.termos||[]).map(cleanTerm).filter(t=>{ const k=t.toLowerCase(); if(!t||seen.has(k)) return false; seen.add(k); return true; }).slice(0,6);
-    if (terms.length) blocks.push({papel:b.papel||'', rotulo:(b.rotulo||b.papel||'').trim(), terms});
+    let rot=(b.rotulo||'').trim(); if (!rot || Object.keys(PAPEL).concat(Object.values(PAPEL)).includes(normTxt(rot).replace('é','e')) || normTxt(rot)===normTxt(b.papel||'')) rot=terms[0].replace(/"/g,'');
+    if (terms.length) blocks.push({papel:b.papel||'', rotulo:rot, terms});
   }
   if (blocks.length<2) throw new Error('O Qwen não extraiu conceitos suficientes do item. Reescreva o item com mais detalhe ou escreva as consultas à mão.');
   return blocks.slice(0,5);
@@ -940,7 +959,7 @@ ACTIONS.suggestQueries = async el => {
   if (text.length<20) return toast('Escreva o item antes.');
   if (it.queries?.trim() && !confirm('Substituir as consultas atuais pelas sugeridas?')) return;
   S.busy['q_'+key]='Qwen extraindo os conceitos do item…'; render();
-  try{ const B=await buildQueries(key, text, m=>{ S.busy['q_'+key]=m; render(); }); it.concepts=B.blocks; storeQueries(it, B.list); touch(p); }
+  try{ const B=await buildQueries(key, text, m=>{ S.busy['q_'+key]=m; render(); }); it.concepts=B.blocks; it.conceptsHash=hashStr(text); storeQueries(it, B.list); touch(p); }
   catch(e){ toast('Sugestão: '+e.message, 7000); }
   delete S.busy['q_'+key]; render();
 };
@@ -958,7 +977,10 @@ function renderQueries(p, key){
   const flag=t=> t>Q_MAX?'<span class="pill warn">ampla demais</span>':t<Q_MIN?'<span class="pill warn">restrita demais</span>':'<span class="pill ok">bom tamanho</span>';
   return `<div class="crit" style="margin-top:10px"><div class="row"><b>1. Consultas de busca</b><span class="small muted">uma por linha · "frase exata", + (e), | (ou), - (excluir), parênteses</span></div>
     <textarea id="it_${key}_q" rows="3" data-bind="items.${key}.queries" data-rerender="1" placeholder="Clique em Sugerir para o Qwen propor a partir do seu texto">${esc(it.queries||'')}</textarea>
-    ${it.concepts?.length?`<div class="small" style="margin:4px 0"><b>Conceitos extraídos</b> (do mais ao menos essencial):${it.concepts.map(b=>`<div><span class="pill">${esc(PAPEL[b.papel]||b.papel)}</span> ${esc(b.rotulo)}: <code>${esc(b.terms.join(' | '))}</code></div>`).join('')}</div>`:''}
+    ${it.concepts?.length?(()=>{ const atual=it.conceptsHash===hashStr(itemText(p,key)); const nq=b=>qs.filter(q=>blockInText(b,q)).length;
+      return `<div class="small" style="margin:4px 0"><b>Conceitos extraídos</b> (do mais ao menos essencial)${atual?'':' <span class="pill warn">de uma versão anterior do texto: clique em Sugerir para atualizar</span>'}:${it.concepts.map(b=>{ const k=nq(b);
+        return `<div><span class="pill">${esc(PAPEL[b.papel]||b.papel)}</span> ${esc(b.rotulo)}: <code>${esc(b.terms.join(' | '))}</code> ${qs.length?(k?`<span class="pill ok">em ${k} consulta${k>1?'s':''}</span>`:'<span class="pill warn">em nenhuma consulta</span>'):''}</div>`; }).join('')}
+      ${qs.length&&it.concepts.some(b=>!nq(b))?`<div class="small"><span class="pill warn">atenção</span> Conceitos que não aparecem em nenhuma consulta não serão amostrados na busca. Se forem centrais no item, escreva uma consulta que exija esse bloco.</div>`:''}</div>`; })():''}
     ${qs.some(q=>notes[q])?`<ul class="small" style="margin:4px 0">${qs.filter(q=>notes[q]).map(q=>`<li><code>${esc(q)}</code> — ${esc(notes[q])}</li>`).join('')}</ul>`:''}
     <div class="row" style="margin-top:6px">${busy?`<span class="pill warn">${esc(busy)}</span>`:`<button class="b sec" data-act="suggestQueries" data-k="${key}" ${LLM.online?'':'disabled'}>Sugerir consultas</button><button class="b sec" data-act="previewQueries" data-k="${key}" ${qs.length?'':'disabled'}>Testar consultas</button>`}</div>
     ${qs.map(q=>({q,w:lintQuery(q)})).filter(x=>x.w.length).map(x=>`<div class="small"><span class="pill warn">revise</span> <code>${esc(x.q)}</code>: ${esc(x.w.join('; '))}</div>`).join('')}
@@ -969,7 +991,7 @@ const cardSchema = withQuote => ({type:'object', required:['status','justificati
   status:{type:'string',enum:['atende','parcial','nao_atende']}, justificativa:{type:'string'}, sugestao:{type:'string'},
   ...(withQuote?{trecho:{type:'string'}}:{ids:{type:'array',items:{type:'string'}}})}});
 const CARD_SYS = c => `Você é um revisor de periódico Q1 em sensoriamento remoto, geoprocessamento e ciências ambientais. Avalie UM critério: "${c.t}" — ${c.d}
-Responda com: "status" (atende, parcial ou nao_atende), "justificativa" (até 60 palavras, específica), "sugestao" (onde e como melhorar, até 60 palavras; não reescreva o item inteiro). Seja rigoroso: na dúvida, "parcial". Português.`;
+Responda com: "status" (atende, parcial ou nao_atende), "justificativa" (até 60 palavras, específica), "sugestao" (onde e como melhorar, até 60 palavras; não reescreva o item inteiro). Seja rigoroso: na dúvida, "parcial". Antes de apontar que falta algo, confira se o item já traz esse elemento (período, lugar, sensor, unidade de análise etc.); nunca diga que falta o que está escrito. Aponte só o que de fato falta, de forma específica. Português.`;
 
 async function evalCriterion(p, key, c, text, A, evid){
   const base={id:c.id, t:c.t, src:c.src};
@@ -985,7 +1007,9 @@ async function evalCriterion(p, key, c, text, A, evid){
   if (c.src==='revista'){
     const j=p.journal; if (!j?.name) return {...base, status:'sem_dados', justificativa:'Escolha a revista-alvo no topo desta tela.', sugestao:''};
     const rs={total:0,data:[]}; const y=new Date().getFullYear(); const seen=new Set(); let falhou='';
-    for (const q of (A.queries.length?A.queries:[text.slice(0,120)])){
+    const ob=A.concepts?.find(b=>b.papel==='objeto'), cx=A.concepts?.find(b=>b.papel==='contexto');
+    const ampla = ob ? [ob, cx].filter(Boolean).map(blockStr).join(' + ') : '';   // revista: busca ampla (objeto + contexto), depois as consultas da análise
+    for (const q of [ampla, ...(A.queries.length?A.queries:[text.slice(0,120)])].filter(Boolean)){
       try{ const r=await s2Bulk(q, 40, `&venue=${encodeURIComponent(j.name)}&year=${y-5}-${y}`); for (const d of r.data){ const kk=(d.doi||d.title||'').toLowerCase(); if (kk && !seen.has(kk)){ seen.add(kk); rs.data.push(d); } } }
       catch(e){ falhou=e.message; }
       await sleep(1100);
@@ -1035,7 +1059,7 @@ function renderItem(p, key){
     ${fields}
     ${renderQueries(p, key)}
     <div class="row" style="margin-top:8px">${b?`<span class="pill warn">${esc(b.msg||'')}</span>${b.t0?`<span class="pill" id="anTimer">${fmtDur((Date.now()-b.t0)/1000)}</span>`:''}${b.total?`<div class="progress" style="flex:1;min-width:120px"><div style="width:${(100*(b.done||0)/b.total).toFixed(0)}%"></div></div>`:''}<button class="b sec" data-act="stopAnalysis" data-k="${key}">Parar</button>`:
-      `<button class="b" data-act="analyze" data-k="${key}" ${LLM.provider==='ollama'?'':'disabled'}>2. Analisar</button><span class="small muted">Lê os ${S.config.k} artigos mais próximos (≈ ${Math.round(S.config.k*4.5/60)+3} min no seu PC). ${LLM.provider==='ollama'?'':'A análise roda no PC com o Ollama.'}</span>`}</div></div>
+      `<button class="b" data-act="analyze" data-k="${key}" ${LLM.provider==='ollama'?'':'disabled'}>2. Analisar</button><span class="small muted">Lê os ${S.config.k} artigos mais próximos (≈ ${Math.max(1,Math.round((S.config.k*3+60)/60))} min no seu PC). ${LLM.provider==='ollama'?'':'A análise roda no PC com o Ollama.'}</span>`}</div></div>
   ${A?renderAnalysis(p, key, A, stale):''}
   ${it.analyses.length>1?`<div class="card"><h2>Versões analisadas</h2><table class="small"><tr><th>Data</th><th>Novidade</th>${def.criteria.map(c=>`<th>${esc(c.t)}</th>`).join('')}<th></th></tr>${[...it.analyses].reverse().map(a=>`<tr><td>${fmtDate(a.at)}</td><td>${a.novelty??'—'}</td>${def.criteria.map(c=>{const x=a.criteria.find(y=>y.id===c.id); return `<td>${x?`<span class="pill ${STATUS[x.status][0]}">${STATUS[x.status][1]}</span>`:'—'}</td>`;}).join('')}<td><button class="b sec" data-act="selA" data-k="${key}" data-a="${a.id}">${a.id===A.id?'aberta':'abrir'}</button></td></tr>`).join('')}</table></div>`:''}`;
 }
@@ -1055,8 +1079,11 @@ function renderAnalysis(p, key, A, stale){
   return `<div class="card"><div class="row"><h2 style="margin:0;flex:1">Análise de ${fmtDate(A.at)}</h2><button class="b sec" data-act="exportA" data-k="${key}" data-a="${A.id}" data-f="txt">Exportar TXT</button><button class="b sec" data-act="exportA" data-k="${key}" data-a="${A.id}" data-f="docx">Exportar Word</button></div>${stale?'<p><span class="pill warn">O texto mudou depois desta análise. Clique em Analisar para avaliar a versão atual.</span></p>':''}
     ${A.warnings.map(w=>`<div class="small"><span class="pill warn">atenção</span> ${esc(w)}</div>`).join('')}
     <div style="margin:8px 0"><span class="kpi"><b>${A.novelty??'—'}</b><span class="small muted">índice de novidade (0–100)</span></span><span class="kpi"><b>${A.top.length}</b><span class="small muted">artigos lidos${A.foraN!=null?` (${A.onTopic} do tema, ${A.foraN} fora)`:''}</span></span><span class="kpi"><b>${A.corpusN}</b><span class="small muted">no corpus com resumo</span></span><span class="kpi"><b>${A.totals.reduce((s,x)=>s+(x.total||0),0)}</b><span class="small muted">resultados das buscas</span></span>${A.dur?`<span class="kpi"><b>${fmtDur(A.dur)}</b><span class="small muted">duração da análise</span></span>`:''}</div>
+    ${A.scope?`<p class="small muted">Artigos ordenados: ${esc(A.scope)}.</p>`:''}
     <table class="small" style="max-width:520px"><tr><th>Entre os mais próximos</th><th>Do tema</th><th>Fora do tema</th><th>Já respondem</th><th>Em parte</th><th>Índice</th></tr>${A.sat.map(s=>`<tr><td>${s.n}</td><td>${s.on??s.n}</td><td>${s.fora??'—'}</td><td>${s.ja}</td><td>${s.pa}</td><td>${s.idx??'—'}</td></tr>`).join('')}</table>
     <p class="small muted">Novidade: atende com índice ≥ 70 e nenhum artigo que já responde; parcial se houver 1 ou 2 que já respondem ou índice entre 40 e 69; não atende com 3 ou mais, ou índice abaixo de 40. Índice = 100 × (1 − (já respondem + ½ em parte) ÷ artigos do tema lidos); os artigos fora do tema não entram na conta. Com menos de 10 artigos do tema (ou menos da metade dos lidos), a novidade fica sem dados. Mede a sobreposição com os artigos mais próximos que as buscas encontraram; depende das consultas e da cobertura da base. ${A.saturou?'Saturação: nenhum artigo que já responde no último terço da lista.':''}</p></div>
+  ${A.concepts?.some(b=>b.of)?`<div class="card"><h2>Cobertura dos conceitos</h2><p class="small muted">Quantos dos artigos lidos citam ao menos um termo de cada bloco no título ou no resumo (contagem direta, sem IA). Cobertura baixa num conceito central significa que a novidade foi medida contra literatura que não trata dele.</p>
+    <table class="small"><tr><th>Papel</th><th>Conceito</th><th>Em consultas</th><th>Artigos lidos que citam</th><th>Entre os do tema</th></tr>${A.concepts.map(b=>{ const pc=b.of?Math.round(100*b.n/b.of):0; return `<tr><td>${esc(PAPEL[b.papel]||b.papel)}</td><td>${esc(b.rotulo)}<div class="muted">${esc(b.terms.join(' | '))}</div></td><td>${b.inQ}</td><td><b>${b.n}/${b.of}</b> (${pc}%) ${pc<20&&['objeto','fator','mecanismo'].includes(b.papel)?'<span class="pill warn">baixa</span>':''}</td><td>${b.nOn}/${b.ofOn}</td></tr>`; }).join('')}</table></div>`:''}
   <div class="card"><h2>Critérios</h2>${A.criteria.map(card).join('')}</div>
   ${A.summary.length?`<div class="card"><h2>O que a literatura diz</h2>${A.summary.map(f=>`<p class="small">${esc(f.texto)} <span class="muted">[${f.ids.map(id=>refLink(recById(p,id))).join('; ')}]</span></p>`).join('')}</div>`:''}
   <div class="card"><h2>Artigos lidos</h2><div class="tabs"><button class="${filt==='relevantes'?'on':''}" data-act="topF" data-f="relevantes">já respondem e em parte</button><button class="${filt==='todos'?'on':''}" data-act="topF" data-f="todos">todos (${A.top.length})</button></div>
@@ -1115,7 +1142,8 @@ function renderConfig(){
   return `<div class="card"><h2>IA local (Ollama)</h2>${inp('ollamaBase','Endereço do Ollama','url')}${inp('ollamaModel','Modelo','text','qwen3:14b')}${inp('embedModel','Modelo de embeddings','text','qwen3-embedding:0.6b')}
     <button class="b sec" data-act="testLLM">Testar conexão</button></div>
   <div class="card"><h2>Análise</h2>${inp('k','Artigos lidos por análise (mais próximos do item)','number')}${inp('perQuery','Máximo de registros trazidos por consulta','number')}
-    <p class="small muted">Com 100 artigos a leitura leva cerca de 7–8 min no seu PC. Artigos já lidos para a mesma versão do item não são relidos.</p></div>
+    <div class="col" style="margin:6px 0"><label>Artigos considerados na ordenação</label><select data-cfg="rankScope"><option value="consultas" ${c.rankScope!=='corpus'?'selected':''}>Só os resultados das consultas desta análise + arquivos importados (recomendado)</option><option value="corpus" ${c.rankScope==='corpus'?'selected':''}>Todo o corpus do projeto (inclui buscas anteriores)</option></select></div>
+    <p class="small muted">A leitura leva cerca de 3 s por artigo no seu PC (50 artigos ≈ 3–4 min). Artigos já lidos para a mesma versão do item não são relidos.</p></div>
   <div class="card"><h2>Sincronização (mesmo Gist do LabResearch)</h2><p class="small muted">O Descartes grava só no arquivo <code>descartes.json</code> do Gist; o arquivo do LabResearch não é alterado. O catálogo de revistas é lido do LabResearch.</p>
     ${inp('gistId','ID do Gist (o mesmo que aparece nas Configurações do LabResearch)','text')}${inp('githubToken','Token do GitHub (fica só neste aparelho)','secret','ghp_...')}
     <p class="small muted">Use um token clássico com o escopo <b>gist</b> (pode ser o mesmo do LabResearch). Ao colar, esvazie o campo antes. O token fica só neste aparelho e é enviado somente à API do GitHub.</p>
@@ -1220,14 +1248,15 @@ function analysisModel(p, key, A){
   B.push({title:`Descartes — análise: ${def.name}`});
   P(`Projeto: ${p.title}`); P(`Data: ${fmtDate(A.at)}${A.dur?` · duração: ${fmtDur(A.dur)}`:''} · modelo: ${A.model||S.config.ollamaModel} · artigos lidos: ${A.top.length} · Descartes v${VERSION}`);
   if (key==='pergunta' && p.journal?.name) P(`Revista-alvo: ${p.journal.name}${p.journal.qualis?` (Qualis ${p.journal.qualis})`:''}`);
-  H(def.name); P(A.text);
+  H(def.name); P(A.text); if (A.scope) P('Artigos ordenados: '+A.scope+'.');
   if (A.warnings.length){ H('Avisos'); L(A.warnings); }
   H('Consultas de busca (Semantic Scholar)'); T([['Consulta','Resultados'], ...A.queries.map(q=>[q, String(A.totals.find(x=>x.q===q)?.total??'—')])]);
-  if (it.concepts?.length){ H('Conceitos extraídos'); T([['Papel','Conceito','Termos'], ...it.concepts.map(b=>[PAPEL[b.papel]||b.papel, b.rotulo, b.terms.join(' | ')])]); }
   H('Indicadores'); T([['Índice de novidade','Artigos lidos','Do tema','Fora do tema','No corpus com resumo','Resultados das buscas'],
     [String(A.novelty??'—'), String(A.top.length), String(A.onTopic??'—'), String(A.foraN??'—'), String(A.corpusN), String(A.totals.reduce((s,x)=>s+(x.total||0),0))]]);
   T([['Entre os mais próximos','Do tema','Fora do tema','Já respondem','Em parte','Índice'], ...A.sat.map(s=>[s.n,s.on??s.n,s.fora??'—',s.ja,s.pa,s.idx??'—'].map(String))]);
   P('Índice = 100 × (1 − (já respondem + ½ em parte) ÷ artigos do tema lidos). Mede a sobreposição com os artigos mais próximos que as buscas encontraram; depende das consultas e da cobertura da base.');
+  if (A.concepts?.some(b=>b.of)){ H('Cobertura dos conceitos nos artigos lidos'); T([['Papel','Conceito','Termos','Em consultas','Artigos lidos que citam','Entre os do tema'], ...A.concepts.map(b=>[PAPEL[b.papel]||b.papel, b.rotulo, b.terms.join(' | '), String(b.inQ), `${b.n}/${b.of} (${b.of?Math.round(100*b.n/b.of):0}%)`, `${b.nOn}/${b.ofOn}`])]);
+    P('Contagem direta dos termos de cada bloco no título e no resumo (sem IA). Cobertura baixa num conceito central indica que a novidade foi medida contra literatura que não trata dele.'); }
   H('Critérios'); T([['Critério','Status','Fonte'], ...A.criteria.map(c=>[c.t, STATUS[c.status]?.[1]||c.status, SRC_PT[c.src]||c.src])]);
   for (const c of A.criteria){
     P(`${c.t} — ${STATUS[c.status]?.[1]||c.status}${c.id==='novidade'&&A.novelty!=null?` (índice ${A.novelty})`:''}`, true);
