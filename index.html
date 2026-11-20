@@ -99,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.2 — núcleo ================= */
-const VERSION = '0.2.9';
+const VERSION = '0.3.0';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -136,7 +136,7 @@ const DB = {
 
 /* ---------- Estado ---------- */
 const DEFAULT_CONFIG = {
-  provider:'ollama', ollamaBase:'http://localhost:11434', ollamaModel:'qwen3:14b', embedModel:'qwen3-embedding:0.6b',
+  provider:'ollama', ollamaBase:'http://localhost:11434', ollamaModel:'qwen3:14b', conceptModel:'', embedModel:'qwen3-embedding:0.6b',
   openalexKey:'', email:'', temperature:0.2,
   gistId:'', githubToken:'', k:100, perQuery:300, rankScope:'consultas',
 };
@@ -252,13 +252,13 @@ const LLM = {
   },
   stripThink(s){ return String(s||'').replace(/<think>[\s\S]*?<\/think>/g,'').trim(); },
   parseJSON(s){ s=LLM.stripThink(s); try{ return JSON.parse(s); }catch(e){} const m=s.match(/\{[\s\S]*\}/); if(m){ try{ return JSON.parse(m[0]); }catch(e){} } throw new Error('Resposta da IA não é JSON válido'); },
-  async chat({system, user, schema, temperature}){
+  async chat({system, user, schema, temperature, model}){
     if (!LLM.online) await LLM.checkStatus();
     if (!LLM.online) throw new Error('IA indisponível');
     const temp = temperature ?? S.config.temperature;
     {
       const r = await fetch(S.config.ollamaBase.replace(/\/$/,'')+'/api/chat', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({model:S.config.ollamaModel, stream:false, think:false, format:schema||'json', options:{temperature:temp, num_ctx:8192},
+        body:JSON.stringify({model:model||S.config.ollamaModel, stream:false, think:false, format:schema||'json', options:{temperature:temp, num_ctx:8192},
           messages:[{role:'system',content:system},{role:'user',content:user}]})});
       if (!r.ok) throw new Error('Ollama: HTTP '+r.status+' '+(await r.text()).slice(0,200));
       const j = await r.json(); return LLM.parseJSON(j.message?.content);
@@ -802,7 +802,9 @@ async function analyzeItem(p, key){
     for (const [i,q] of queries.entries()){
       if (stopped(key)) throw new Error('interrompida');
       setStep(key,`Buscando no Semantic Scholar (${i+1}/${queries.length})…`);
-      try{ const r=await s2Bulk(q, per); const novos=addRecords(p, r.data, 'Semantic Scholar', hits);
+      try{ const h=Math.ceil(per/2); const r=await s2Bulk(q, h, '&sort=citationCount:desc');   // mais citados + mais recentes, em vez de uma amostra arbitrária
+        if (r.total>r.data.length){ await sleep(1100); const r2=await s2Bulk(q, h, '&sort=publicationDate:desc'); r.data=[...r.data, ...r2.data]; }
+        const novos=addRecords(p, r.data, 'Semantic Scholar', hits);
         logSearch(p,{fonte:'Semantic Scholar (bulk)', consulta:q, tipo:'termos', n:r.data.length, novos, total:r.total, item:key}); A.totals.push({q, total:r.total, got:r.data.length, novos}); }
       catch(e){ A.warnings.push(`Busca "${q}" falhou: ${e.message}. A análise usa o corpus já existente.`); }
       await sleep(1100);
@@ -893,9 +895,9 @@ const Q_MIN=20, Q_MAX=5000;
 const conceptSchema={type:'object',required:['blocos'],properties:{blocos:{type:'array',items:{type:'object',required:['papel','rotulo','termos'],properties:{papel:{type:'string',enum:['objeto','fator','mecanismo','metodo','contexto']},rotulo:{type:'string'},termos:{type:'array',items:{type:'string'}}}}}}};
 const CONCEPT_PROMPT=`Você prepara a busca bibliográfica de um item de pesquisa. Não escreva consultas: extraia os CONCEITOS que um artigo relevante precisa conter.
 Devolva de 3 a 5 blocos, do mais essencial ao menos essencial:
-- objeto: o que é estudado;
+- objeto: o que é medido ou estudado (ex.: vegetação nativa, cobertura do solo), nunca a causa;
 - fator: o que atua sobre o objeto;
-- mecanismo: o efeito ou problema que o item investiga, traduzido para o vocabulário técnico da área (ex.: "mascarar o resultado" de um monitoramento por satélite = commission error, false change, misclassification);
+- mecanismo: o efeito ou problema que o item investiga, traduzido para o vocabulário técnico da área. Se o item trata de erro, viés, incerteza ou de algo que "mascara" um resultado de monitoramento, use o vocabulário da literatura de exatidão: accuracy, omission, commission, agreement, uncertainty, confusion, validation;
 - metodo: dado ou técnica, só se o item citar ou pressupor;
 - contexto: lugar, bioma ou regime legal.
 Cada termo pertence a um só bloco (o que atua sobre o objeto vai em fator, não em objeto). Nunca use anos, períodos ou números como termos: datas não são conceitos. Em cada bloco, de 2 a 6 termos em inglês, de 1 a 3 palavras cada (prefira 1 ou 2), que apareçam de fato em títulos e resumos científicos. Prefira o termo mais usado na literatura do tema, não a tradução literal (ex.: em savanas se escreve fire e burned area, raramente wildfire). Nomes de biomas e regiões podem ficar no original. Nunca escreva frases descritivas. "rotulo" é o nome do conceito em português, em 2 a 4 palavras (ex.: "cicatrizes de queimada"), nunca o nome do papel ("objeto", "fator").`;
@@ -905,7 +907,10 @@ const PAPEL={objeto:'objeto', fator:'fator', mecanismo:'mecanismo', metodo:'mét
 function cleanTerm(t){ t=String(t||'').replace(/["“”()|+]/g,' ').replace(/(^|\s)-+/g,' ').replace(/\s+/g,' ').trim(); if(!t || /^[\d\s.,\/–-]+$/.test(t) || /\b(1[89]|20)\d\d\b/.test(t)) return ''; const n=t.split(' ').length; return n>3?'':n>1?`"${t}"`:t; }
 const blockStr = b => b.terms.length>1?`(${b.terms.join(' | ')})`:b.terms[0];
 async function extractConcepts(key, text){
-  const o=await LLM.chatValid({system:CONCEPT_PROMPT, user:`ITEM (${ITEMS[key].name}):\n${text}`, schema:conceptSchema}, o=>Array.isArray(o.blocos)&&o.blocos.length>=2?null:'blocos');
+  const req={system:CONCEPT_PROMPT, user:`ITEM (${ITEMS[key].name}):\n${text}`, schema:conceptSchema}, val=o=>Array.isArray(o.blocos)&&o.blocos.length>=2?null:'blocos';
+  let o; const cm=(S.config.conceptModel||'').trim();
+  if (cm){ try{ o=await LLM.chatValid({...req, model:cm}, val); }catch(e){ toast(`Modelo de conceitos "${cm}" indisponível (${String(e.message).slice(0,80)}); usando ${S.config.ollamaModel}.`, 8000); } }
+  if (!o) o=await LLM.chatValid(req, val);
   const seen=new Set(), blocks=[];
   for (const b of o.blocos){
     const terms=(b.termos||[]).map(cleanTerm).filter(t=>{ const k=t.toLowerCase(); if(!t||seen.has(k)) return false; seen.add(k); return true; }).slice(0,6);
@@ -922,7 +927,7 @@ async function buildQueries(key, text, onMsg){
   const test=async ix=>{ const q=ix.map(i=>blockStr(blocks[i])).join(' + ');
     if (!cache.has(q)){ onMsg?.(`Testando combinações de conceitos (${cache.size+1})…`); cache.set(q, await testQuery(q)); await sleep(1100); }
     return {...cache.get(q), q, ix}; };
-  const all=[...blocks.keys()], ctx=blocks.findIndex(b=>b.papel==='contexto'), mec=blocks.findIndex(b=>b.papel==='mecanismo'), fixo=i=>i===0||i===ctx||i===mec;
+  const all=[...blocks.keys()], ctx=blocks.findIndex(b=>b.papel==='contexto');
   /* Termos sem nenhum resultado no contexto são descartados (só quando a consulta fica restrita demais); o conceito fica */
   const pruned=[], podado=new Set();
   const prune=async ix=>{ let mudou=false;
@@ -931,21 +936,19 @@ async function buildQueries(key, text, onMsg){
         if (r.erro || r.total>0) keep.push(t); else pruned.push(`${t} (${b.rotulo})`); }
       if (keep.length && keep.length<b.terms.length){ b.terms=keep; mudou=true; } }
     return mudou; };
-  const combos=[all, ...all.filter(i=>!fixo(i)).map(i=>all.filter(j=>j!==i))].filter(c=>c.length>=2);
-  const out=[];
-  for (const c of combos){
-    let ix=[...c], antes=[], r=await test(ix);
-    while (!r.erro && r.total<Q_MIN && ix.length>2){ const d=[...ix].reverse().find(i=>!fixo(i)); if (d==null) break; antes.push({q:r.q,total:r.total}); ix=ix.filter(i=>i!==d); r=await test(ix); }
-    if (!r.erro && r.total<Q_MIN && await prune(ix)){ antes.push({q:r.q,total:r.total}); r=await test(ix); }   // objeto, mecanismo e contexto nunca saem: um corpus pequeno sobre o problema vale mais que um grande sem ele
-    if (!out.some(x=>x.q===r.q)) out.push({...r, antes});
-  }
-  const ok=x=>!x.erro && x.total>=Q_MIN && x.total<=Q_MAX;
-  let pool=out.filter(ok).sort((a,b)=>b.ix.length-a.ix.length || a.total-b.total);
-  if (!pool.length) pool=out.filter(x=>!x.erro).sort((a,b)=>Math.abs(Math.log((a.total||1)/300))-Math.abs(Math.log((b.total||1)/300)));
-  const chosen=pool.slice(0,3);
-  if (!chosen.length) throw new Error('O Semantic Scholar não respondeu aos testes. Tente de novo em alguns minutos.');
-  return {blocks, pruned, list:chosen.map(x=>({consulta:x.q, total:x.total, top:x.top||[], erro:x.erro, antes:x.antes.length?x.antes:undefined,
-    objetivo:'Cobre: '+x.ix.map(i=>blocks[i].rotulo).join(' · ')+(x.ix.length<blocks.length?' (sem: '+all.filter(i=>!x.ix.includes(i)).map(i=>blocks[i].rotulo).join(', ')+')':'')}))};
+  /* Estratégia por facetas: cada conceito é buscado junto com o contexto (âncora). A interseção dos conceitos é feita depois,
+     pela proximidade semântica com o item; exigir todos os conceitos no mesmo resumo devolve só a lacuna, com poucos artigos. */
+  const anchor = ctx>=0 ? ctx : 0, out=[];
+  for (const i of all){ if (i===anchor) continue;
+    let ix=[i, anchor], antes=[], r=await test(ix);
+    if (!r.erro && r.total>Q_MAX && i!==0 && anchor!==0){ antes.push({q:r.q,total:r.total}); ix=[i,0,anchor]; r=await test(ix); }   // ampla demais: acrescenta o objeto
+    if (!r.erro && r.total<Q_MIN && await prune(ix)){ antes.push({q:r.q,total:r.total}); r=await test(ix); }
+    if (!out.some(x=>x.q===r.q)) out.push({...r, antes, tipo:'faceta'}); }
+  if (blocks.length>2){ const r=await test(all); if (!r.erro && r.total>=Q_MIN && r.total<=Q_MAX && !out.some(x=>x.q===r.q)) out.push({...r, antes:[], tipo:'intersecao'}); }
+  const valid=out.filter(x=>!x.erro && x.total>0);
+  if (!valid.length) throw new Error(out.some(x=>x.erro)?'O Semantic Scholar não respondeu aos testes. Tente de novo em alguns minutos.':'Nenhuma consulta trouxe artigos. Revise os termos dos conceitos ou escreva as consultas à mão.');
+  return {blocks, pruned, list:valid.map(x=>({consulta:x.q, total:x.total, top:x.top||[], erro:x.erro, antes:x.antes.length?x.antes:undefined,
+    objetivo: x.tipo==='intersecao' ? 'Interseção de todos os conceitos' : `Faceta: ${blocks[x.ix[0]].rotulo}${x.ix.length>2?' (com o objeto, para reduzir o volume)':''} · no contexto: ${blocks[anchor].rotulo}`}))};
 }
 async function testQuery(q){
   try{ const j=await s2Fetch(`https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodeURIComponent(q)}&fields=title,year,citationCount&sort=citationCount:desc`);
@@ -1172,7 +1175,7 @@ document.addEventListener('input', ev => { if (ev.target.dataset.bindp?.startsWi
 /* ---------- Configurações ---------- */
 function renderConfig(){
   const c=S.config; const inp=(k,label,type='text',ph='')=>`<div class="col" style="margin:6px 0"><label>${label}</label><input type="${type==='secret'?'text':type}" data-cfg="${k}" value="${esc(c[k]??'')}" placeholder="${esc(ph)}"${type==='secret'?' autocomplete="off" spellcheck="false" data-lpignore="true" style="-webkit-text-security:disc"':''}></div>`;
-  return `<div class="card"><h2>IA local (Ollama)</h2>${inp('ollamaBase','Endereço do Ollama','url')}${inp('ollamaModel','Modelo','text','qwen3:14b')}${inp('embedModel','Modelo de embeddings','text','qwen3-embedding:0.6b')}
+  return `<div class="card"><h2>IA local (Ollama)</h2>${inp('ollamaBase','Endereço do Ollama','url')}${inp('ollamaModel','Modelo','text','qwen3:14b')}${inp('conceptModel','Modelo só para extrair os conceitos (opcional; ex.: qwen3:30b-a3b — vazio usa o modelo acima)','text','')}${inp('embedModel','Modelo de embeddings','text','qwen3-embedding:0.6b')}
     <button class="b sec" data-act="testLLM">Testar conexão</button></div>
   <div class="card"><h2>Análise</h2>${inp('k','Artigos lidos por análise (mais próximos do item)','number')}${inp('perQuery','Máximo de registros trazidos por consulta','number')}
     <div class="col" style="margin:6px 0"><label>Artigos considerados na ordenação</label><select data-cfg="rankScope"><option value="consultas" ${c.rankScope!=='corpus'?'selected':''}>Só os resultados das consultas desta análise + arquivos importados (recomendado)</option><option value="corpus" ${c.rankScope==='corpus'?'selected':''}>Todo o corpus do projeto (inclui buscas anteriores)</option></select></div>
