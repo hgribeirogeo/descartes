@@ -99,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.2 — núcleo ================= */
-const VERSION = '0.2.5';
+const VERSION = '0.2.6';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -781,7 +781,9 @@ async function analyzeItem(p, key){
   S.busy['an_'+key]={msg:'Preparando…'}; render();
   if (!(await LLM.checkStatus()) || LLM.provider!=='ollama'){ delete S.busy['an_'+key]; render(); return toast('A análise usa o Qwen e os embeddings no PC: abra o Descartes no computador com o Ollama ligado.', 7000); }
   const k=Math.max(10, Math.min(300, Number(S.config.k)||100)); const per=Math.max(50, Math.min(2000, Number(S.config.perQuery)||300));
-  const A={id:uid('a'), at:nowISO(), textHash:hashStr(text), text, k, queries:[], totals:[], criteria:[], summary:[], top:[], warnings:[]};
+  const A={id:uid('a'), at:nowISO(), textHash:hashStr(text), ck:key+'|'+hashStr(text)+'|c2', model:S.config.ollamaModel, text, k, queries:[], totals:[], criteria:[], summary:[], top:[], warnings:[]};
+  const t0=Date.now(); S.busy['an_'+key].t0=t0;
+  const tick=setInterval(()=>{ const el=document.getElementById('anTimer'); if (el) el.textContent=fmtDur((Date.now()-t0)/1000); }, 1000);
   try{
     /* 1. Consultas: as suas, se você escreveu; senão o Qwen propõe */
     let queries = (it.queries||'').split('\n').map(s=>s.trim()).filter(Boolean);
@@ -812,30 +814,33 @@ async function analyzeItem(p, key){
     const top=ranked.slice(0,k); A.corpusN=cand.length; A.semResumo=p.lit.records.filter(r=>!r.abstract).length;
     if (top.length<k) A.warnings.push(`O corpus tem só ${top.length} artigos com resumo; a análise leu todos.`);
     /* 4. Leitura dos k mais próximos (com cache por versão do item) */
-    const ck=key+'|'+A.textHash;
+    const ck=A.ck;
     for (const [i,x] of top.entries()){
       if (stopped(key)) throw new Error('interrompida');
       setStep(key,`Lendo os artigos mais próximos (${i+1}/${top.length})…`, i, top.length);
       const r=x.r; r.cls ||= {};
       if (!r.cls[ck]){
         const src=r.title+'\n'+r.abstract;
-        const o=await LLM.chatValid({system:`Você compara um artigo científico com um item de pesquisa. Use SOMENTE o título e o resumo. "ja_responde": ${def.cls}; "em_parte": trata do mesmo problema, mas em outro contexto, com outra abordagem ou só em parte; "nao_responde": não trata do item. "trecho": cópia literal de até 160 caracteres do resumo que justifica. Português.`,
-          user:`ITEM (${def.name}):\n${text}\n\nTÍTULO: ${r.title}\nRESUMO: ${r.abstract}`, schema:{type:'object',required:['classe','trecho'],properties:{classe:{type:'string',enum:['ja_responde','em_parte','nao_responde']},trecho:{type:'string'}}}},
-          o=>['ja_responde','em_parte','nao_responde'].includes(o.classe)?null:'classe');
+        const o=await LLM.chatValid({system:`Você compara um artigo científico com um item de pesquisa. Use SOMENTE o título e o resumo. "ja_responde": ${def.cls}; "em_parte": trata do mesmo problema, mas em outro contexto, com outra abordagem ou só em parte; "nao_responde": é do mesmo tema geral do item (mesmo objeto, fator ou contexto), mas não trata do problema que o item investiga; "fora_do_tema": não é do tema do item (outro objeto, outro fenômeno ou outra área), mesmo que compartilhe palavras. "trecho": cópia literal de até 160 caracteres do resumo que justifica. Português.`,
+          user:`ITEM (${def.name}):\n${text}\n\nTÍTULO: ${r.title}\nRESUMO: ${r.abstract}`, schema:{type:'object',required:['classe','trecho'],properties:{classe:{type:'string',enum:['ja_responde','em_parte','nao_responde','fora_do_tema']},trecho:{type:'string'}}}},
+          o=>['ja_responde','em_parte','nao_responde','fora_do_tema'].includes(o.classe)?null:'classe');
         const ok=quoteOK(o.trecho, src);
-        r.cls[ck]={classe: (!ok && o.classe!=='nao_responde') ? 'em_parte' : o.classe, trecho:o.trecho, ok};
+        r.cls[ck]={classe: (!ok && (o.classe==='ja_responde'||o.classe==='em_parte')) ? 'em_parte' : o.classe, trecho:o.trecho, ok};
       }
       A.top.push({id:r.id, s:+x.s.toFixed(3), classe:r.cls[ck].classe});
       if (i%10===9) touch(p);
     }
     /* 5. Índice de sobreposição/novidade e saturação */
-    const ind = n => { const sl=A.top.slice(0,n); const ja=sl.filter(t=>t.classe==='ja_responde').length, pa=sl.filter(t=>t.classe==='em_parte').length; return {n:sl.length, ja, pa, idx: sl.length? Math.round(100*(1-(ja+0.5*pa)/sl.length)) : null}; };
+    const ind = n => { const sl=A.top.slice(0,n), on=sl.filter(t=>t.classe!=='fora_do_tema'); const ja=on.filter(t=>t.classe==='ja_responde').length, pa=on.filter(t=>t.classe==='em_parte').length;
+      return {n:sl.length, on:on.length, fora:sl.length-on.length, ja, pa, idx: on.length? Math.round(100*(1-(ja+0.5*pa)/on.length)) : null}; };
     A.sat=[15,50,A.top.length].filter((n,i,a)=>n<=A.top.length && a.indexOf(n)===i).map(ind);
-    A.novelty=ind(A.top.length).idx;
+    const all=ind(A.top.length); A.novelty=all.idx; A.onTopic=all.on; A.foraN=all.fora;
+    if (all.fora > all.n/2) A.warnings.push(`Busca imprecisa: ${all.fora} dos ${all.n} artigos lidos estão fora do tema. O índice foi calculado só sobre os ${all.on} do tema e é pouco confiável; revise as consultas.`);
+    if (all.on < Math.min(10, Math.ceil(all.n/2))) A.warnings.push(`Só ${all.on} artigos do tema entre os lidos: amostra pequena para medir a novidade.`);
     const tail=A.top.slice(Math.floor(A.top.length*2/3)); A.saturou = !tail.some(t=>t.classe==='ja_responde');
     if (!A.saturou) A.warnings.push('Ainda aparecem artigos que já respondem ao item no último terço da lista: aumente o número de artigos lidos ou revise as consultas.');
     /* 6. Cartões por critério (um critério por chamada) */
-    const evid = () => { const rel=A.top.filter(t=>t.classe!=='nao_responde').slice(0,8); const rest=A.top.filter(t=>t.classe==='nao_responde').slice(0,12-rel.length);
+    const evid = () => { const rel=A.top.filter(t=>t.classe==='ja_responde'||t.classe==='em_parte').slice(0,8); const rest=A.top.filter(t=>t.classe==='nao_responde').slice(0,12-rel.length);
       return [...rel,...rest].map((t,i)=>({code:'A'+(i+1), r:recById(p,t.id), classe:t.classe})); };
     for (const [i,c] of def.criteria.entries()){
       if (stopped(key)) throw new Error('interrompida');
@@ -859,12 +864,13 @@ async function analyzeItem(p, key){
     if (partial.length){
       const o=await LLM.chatValid({system:'Consolide as frases abaixo num resumo de 4 a 6 frases sobre o estado da literatura em relação ao item: o que já se sabe, como se estuda e o que falta. Mantenha em "ids" apenas códigos R… presentes nas frases de origem. Português.',
         user:`ITEM:\n${text}\n\nFRASES:\n`+partial.map(f=>`- ${f.texto} [${f.ids.join(', ')}]`).join('\n'), schema:frasesSchema}, o=>Array.isArray(o.frases)?null:'frases');
-      A.summary=o.frases.map(f=>({texto:f.texto, ids:(f.ids||[]).filter(c=>codeMap.has(c)).map(c=>codeMap.get(c))})).filter(f=>f.ids.length);
+      A.summary=o.frases.map(f=>({texto:decode(f.texto, c=>codeMap.has(c)?recById(p,codeMap.get(c)):null), ids:(f.ids||[]).filter(c=>codeMap.has(c)).map(c=>codeMap.get(c))})).filter(f=>f.ids.length);
     }
+    A.dur=Math.round((Date.now()-t0)/1000);
     it.analyses.push(A); logDiary(p,{kind:'análise', item:key, text:`${def.name}: índice de novidade ${A.novelty}; `+A.criteria.map(c=>`${c.t}: ${STATUS[c.status][1]}`).join('; ')});
-    toast('Análise concluída.');
+    toast('Análise concluída em '+fmtDur(A.dur)+'.');
   }catch(e){ if (e.message!=='interrompida') toast('Análise: '+e.message, 8000); else toast('Análise interrompida.'); }
-  delete S.busy['an_'+key]; touch(p); render();
+  clearInterval(tick); delete S.busy['an_'+key]; touch(p); render();
 }
 /* ---------- Consultas: o Qwen extrai os conceitos; o código monta e calibra ---------- */
 const Q_MIN=20, Q_MAX=5000;
@@ -890,18 +896,19 @@ async function extractConcepts(key, text){
   if (blocks.length<2) throw new Error('O Qwen não extraiu conceitos suficientes do item. Reescreva o item com mais detalhe ou escreva as consultas à mão.');
   return blocks.slice(0,5);
 }
-/* Combinações: todos os blocos e "todos menos um" (o objeto fica sempre). Poucos resultados: retira o bloco menos essencial. */
+/* Combinações: todos os blocos e "todos menos um". O objeto e o contexto ficam sempre (sem contexto a busca sai do tema). Poucos resultados: retira o bloco menos essencial que não seja objeto nem contexto. */
 async function buildQueries(key, text, onMsg){
   onMsg?.('Qwen extraindo os conceitos do item…');
   const blocks=await extractConcepts(key, text); const cache=new Map();
   const test=async ix=>{ const q=ix.map(i=>blockStr(blocks[i])).join(' + ');
     if (!cache.has(q)){ onMsg?.(`Testando combinações de conceitos (${cache.size+1})…`); cache.set(q, await testQuery(q)); await sleep(1100); }
     return {...cache.get(q), q, ix}; };
-  const all=[...blocks.keys()]; const combos=[all, ...all.slice(1).map(i=>all.filter(j=>j!==i))].filter(c=>c.length>=2);
+  const all=[...blocks.keys()], ctx=blocks.findIndex(b=>b.papel==='contexto'), fixo=i=>i===0||i===ctx;
+  const combos=[all, ...all.filter(i=>!fixo(i)).map(i=>all.filter(j=>j!==i))].filter(c=>c.length>=2);
   const out=[];
   for (const c of combos){
     let ix=[...c], antes=[], r=await test(ix);
-    while (!r.erro && r.total<Q_MIN && ix.length>2){ antes.push({q:r.q,total:r.total}); ix=ix.slice(0,-1); r=await test(ix); }
+    while (!r.erro && r.total<Q_MIN && ix.length>2){ const d=[...ix].reverse().find(i=>!fixo(i)); if (d==null) break; antes.push({q:r.q,total:r.total}); ix=ix.filter(i=>i!==d); r=await test(ix); }
     if (!out.some(x=>x.q===r.q)) out.push({...r, antes});
   }
   const ok=x=>!x.erro && x.total>=Q_MIN && x.total<=Q_MAX;
@@ -977,24 +984,35 @@ async function evalCriterion(p, key, c, text, A, evid){
   }
   if (c.src==='revista'){
     const j=p.journal; if (!j?.name) return {...base, status:'sem_dados', justificativa:'Escolha a revista-alvo no topo desta tela.', sugestao:''};
-    let rs={total:0,data:[]}; const y=new Date().getFullYear();
-    try{ rs=await s2Bulk(A.queries[0]||text.slice(0,120), 40, `&venue=${encodeURIComponent(j.name)}&year=${y-5}-${y}`); }catch(e){ return {...base, status:'sem_dados', justificativa:'Não foi possível consultar os artigos da revista: '+e.message, sugestao:''}; }
-    if (!rs.data.length) return {...base, status:'nao_atende', justificativa:`Nenhum artigo de ${j.name} dos últimos 5 anos apareceu com os termos do item.`, sugestao:'Confira se o tema cabe na revista ou se as consultas estão estreitas demais; compare com outra revista do catálogo.', venueN:0};
+    const rs={total:0,data:[]}; const y=new Date().getFullYear(); const seen=new Set(); let falhou='';
+    for (const q of (A.queries.length?A.queries:[text.slice(0,120)])){
+      try{ const r=await s2Bulk(q, 40, `&venue=${encodeURIComponent(j.name)}&year=${y-5}-${y}`); for (const d of r.data){ const kk=(d.doi||d.title||'').toLowerCase(); if (kk && !seen.has(kk)){ seen.add(kk); rs.data.push(d); } } }
+      catch(e){ falhou=e.message; }
+      await sleep(1100);
+    }
+    rs.total=rs.data.length;
+    if (!rs.data.length && falhou) return {...base, status:'sem_dados', justificativa:'Não foi possível consultar os artigos da revista: '+falhou, sugestao:''};
+    if (rs.data.length<3) return {...base, status:'sem_dados', justificativa:`Só ${rs.data.length} artigo(s) de ${j.name} dos últimos 5 anos apareceram com os termos das consultas: amostra insuficiente para avaliar o alinhamento.`, sugestao:'Confira se o nome da revista está exato (como aparece no Semantic Scholar) ou amplie as consultas. Enquanto isso, avalie o alinhamento pela página de escopo da revista.', venueN:rs.data.length, venueRefs:rs.data.map(r=>({title:r.title, year:r.year, doi:r.doi}))};
     const ev=rs.data.slice(0,10).map((r,i)=>({code:'J'+(i+1), r}));
-    const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"ids": códigos J… dos artigos da revista mais próximos do item.', user:`REVISTA: ${j.name}\nITEM:\n${text}\n\nARTIGOS RECENTES DA REVISTA COM TERMOS PRÓXIMOS (${rs.total} no total):\n`+ev.map(x=>`${x.code}: ${x.r.title} (${x.r.year||''}). ${(x.r.abstract||'').slice(0,300)}`).join('\n'), schema:cardSchema(false)}, o=>STATUS[o.status]?null:'status');
-    const m=new Map(ev.map(x=>[x.code,x.r])); return {...base, ...o, venueN:rs.total, venueRefs:(o.ids||[]).filter(x=>m.has(x)).map(x=>({title:m.get(x).title, year:m.get(x).year, doi:m.get(x).doi}))};
+    const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"ids": códigos J… dos artigos da revista mais próximos do item.', user:`REVISTA: ${j.name}\nITEM:\n${text}\n\nARTIGOS RECENTES DA REVISTA COM TERMOS PRÓXIMOS (${rs.total} encontrados):\n`+ev.map(x=>`${x.code}: ${x.r.title} (${x.r.year||''}). ${(x.r.abstract||'').slice(0,300)}`).join('\n'), schema:cardSchema(false)}, o=>STATUS[o.status]?null:'status');
+    const m=new Map(ev.map(x=>[x.code,x.r])); const dec=t=>decode(t, c=>m.get(c)||null);
+    return {...base, ...o, justificativa:dec(o.justificativa), sugestao:dec(o.sugestao), venueN:rs.total, venueRefs:(o.ids||[]).filter(x=>m.has(x)).map(x=>({title:m.get(x).title, year:m.get(x).year, doi:m.get(x).doi}))};
   }
   // literatura
   const ev=evid(); const m=new Map(ev.map(x=>[x.code,x.r.id]));
   const o=await LLM.chatValid({system:CARD_SYS(c)+'\n"ids": códigos A… dos artigos que sustentam a avaliação. Baseie-se nos artigos fornecidos.', user:`ITEM:\n${text}\n\n${c.novelty?`ÍNDICE DE NOVIDADE CALCULADO: ${A.novelty} (de 0 a 100; quanto menor, mais artigos já respondem).\n\n`:''}ARTIGOS MAIS PRÓXIMOS (classificação prévia entre colchetes):\n`+ev.map(x=>`${x.code} [${x.classe}]: ${x.r.title} (${x.r.year||''}). ${(x.r.abstract||'').slice(0,350)}`).join('\n'), schema:cardSchema(false)}, o=>STATUS[o.status]?null:'status');
   let status=o.status;
   if (c.novelty){ const ja=A.top.filter(t=>t.classe==='ja_responde').length;   // o status da novidade vem do índice e da contagem, não da opinião do modelo
-    status = (ja>=3 || A.novelty<40) ? 'nao_atende' : (ja>=1 || A.novelty<70) ? 'parcial' : 'atende'; }
-  return {...base, ...o, status, ids:(o.ids||[]).filter(x=>m.has(x)).map(x=>m.get(x))};
+    status = A.novelty==null || A.onTopic<Math.min(10, Math.ceil(A.top.length/2)) ? 'sem_dados' : (ja>=3 || A.novelty<40) ? 'nao_atende' : (ja>=1 || A.novelty<70) ? 'parcial' : 'atende'; }
+  const dec=t=>decode(t, c=>m.has(c)?recById(p,m.get(c)):null);
+  return {...base, ...o, justificativa:dec(o.justificativa), sugestao:dec(o.sugestao), status, ids:(o.ids||[]).filter(x=>m.has(x)).map(x=>m.get(x))};
 }
 ACTIONS.analyze = el => analyzeItem(cur(), el.dataset.k);
 
 /* ---------- Renderização ---------- */
+const refPlain = r => r ? `${((r.authors||'').split(/[;,]/)[0].trim().split(' ').pop()||'s.a.')} ${r.year||''}`.trim() : '';
+const decode = (t, get) => String(t||'').replace(/\b([AJR]\d{1,3})\b/g, c=>{ const r=get(c); return r?refPlain(r):c; });   // A1, J2, R3 → Autor ano
+const fmtDur = s => { s=Math.max(0,Math.round(s)); return `${Math.floor(s/60)} min ${String(s%60).padStart(2,'0')} s`; };
 const refShort = r => r ? `${esc((r.authors||'').split(/[;,]/)[0].trim().split(' ').pop()||'s.a.')} ${r.year||''}` : '';
 const refLink = r => r ? (r.doi?`<a href="https://doi.org/${esc(r.doi)}" target="_blank" rel="noopener" title="${esc(r.title)}">${refShort(r)}</a>`:`<span title="${esc(r.title)}">${refShort(r)}</span>`) : '';
 function journalPicker(p){
@@ -1016,7 +1034,7 @@ function renderItem(p, key){
     ${key==='pergunta'?journalPicker(p):''}
     ${fields}
     ${renderQueries(p, key)}
-    <div class="row" style="margin-top:8px">${b?`<span class="pill warn">${esc(b.msg||'')}</span>${b.total?`<div class="progress" style="flex:1;min-width:120px"><div style="width:${(100*(b.done||0)/b.total).toFixed(0)}%"></div></div>`:''}<button class="b sec" data-act="stopAnalysis" data-k="${key}">Parar</button>`:
+    <div class="row" style="margin-top:8px">${b?`<span class="pill warn">${esc(b.msg||'')}</span>${b.t0?`<span class="pill" id="anTimer">${fmtDur((Date.now()-b.t0)/1000)}</span>`:''}${b.total?`<div class="progress" style="flex:1;min-width:120px"><div style="width:${(100*(b.done||0)/b.total).toFixed(0)}%"></div></div>`:''}<button class="b sec" data-act="stopAnalysis" data-k="${key}">Parar</button>`:
       `<button class="b" data-act="analyze" data-k="${key}" ${LLM.provider==='ollama'?'':'disabled'}>2. Analisar</button><span class="small muted">Lê os ${S.config.k} artigos mais próximos (≈ ${Math.round(S.config.k*4.5/60)+3} min no seu PC). ${LLM.provider==='ollama'?'':'A análise roda no PC com o Ollama.'}</span>`}</div></div>
   ${A?renderAnalysis(p, key, A, stale):''}
   ${it.analyses.length>1?`<div class="card"><h2>Versões analisadas</h2><table class="small"><tr><th>Data</th><th>Novidade</th>${def.criteria.map(c=>`<th>${esc(c.t)}</th>`).join('')}<th></th></tr>${[...it.analyses].reverse().map(a=>`<tr><td>${fmtDate(a.at)}</td><td>${a.novelty??'—'}</td>${def.criteria.map(c=>{const x=a.criteria.find(y=>y.id===c.id); return `<td>${x?`<span class="pill ${STATUS[x.status][0]}">${STATUS[x.status][1]}</span>`:'—'}</td>`;}).join('')}<td><button class="b sec" data-act="selA" data-k="${key}" data-a="${a.id}">${a.id===A.id?'aberta':'abrir'}</button></td></tr>`).join('')}</table></div>`:''}`;
@@ -1031,18 +1049,18 @@ function renderAnalysis(p, key, A, stale){
       ${c.trecho?`<div class="quote small">“${esc(c.trecho)}” ${c.trechoOK?'':'<span class="pill bad">trecho não encontrado no item</span>'}</div>`:''}
       ${refs.length?`<div class="small muted">Evidência: ${refs.join('; ')}</div>`:''}
       ${c.venueRefs?.length?`<div class="small muted">Na revista (${c.venueN} com termos próximos): ${c.venueRefs.map(r=>r.doi?`<a href="https://doi.org/${esc(r.doi)}" target="_blank" rel="noopener">${esc(r.title)}</a>`:esc(r.title)).join('; ')}</div>`:''}</div>`; };
-  const pill=cl=>cl==='ja_responde'?'<span class="pill bad">já responde</span>':cl==='em_parte'?'<span class="pill warn">em parte</span>':'<span class="pill">não responde</span>';
+  const pill=cl=>cl==='ja_responde'?'<span class="pill bad">já responde</span>':cl==='em_parte'?'<span class="pill warn">em parte</span>':cl==='fora_do_tema'?'<span class="pill">fora do tema</span>':'<span class="pill">não responde</span>';
   const filt=S.topFilter||'relevantes';
-  const list=A.top.filter(t=>filt==='todos'||t.classe!=='nao_responde');
-  return `<div class="card"><h2>Análise de ${fmtDate(A.at)}</h2>${stale?'<p><span class="pill warn">O texto mudou depois desta análise. Clique em Analisar para avaliar a versão atual.</span></p>':''}
+  const list=A.top.filter(t=>filt==='todos'||t.classe==='ja_responde'||t.classe==='em_parte');
+  return `<div class="card"><div class="row"><h2 style="margin:0;flex:1">Análise de ${fmtDate(A.at)}</h2><button class="b sec" data-act="exportA" data-k="${key}" data-a="${A.id}" data-f="txt">Exportar TXT</button><button class="b sec" data-act="exportA" data-k="${key}" data-a="${A.id}" data-f="docx">Exportar Word</button></div>${stale?'<p><span class="pill warn">O texto mudou depois desta análise. Clique em Analisar para avaliar a versão atual.</span></p>':''}
     ${A.warnings.map(w=>`<div class="small"><span class="pill warn">atenção</span> ${esc(w)}</div>`).join('')}
-    <div style="margin:8px 0"><span class="kpi"><b>${A.novelty??'—'}</b><span class="small muted">índice de novidade (0–100)</span></span><span class="kpi"><b>${A.top.length}</b><span class="small muted">artigos lidos</span></span><span class="kpi"><b>${A.corpusN}</b><span class="small muted">no corpus com resumo</span></span><span class="kpi"><b>${A.totals.reduce((s,x)=>s+(x.total||0),0)}</b><span class="small muted">resultados das buscas</span></span></div>
-    <table class="small" style="max-width:520px"><tr><th>Entre os mais próximos</th><th>Já respondem</th><th>Em parte</th><th>Índice</th></tr>${A.sat.map(s=>`<tr><td>${s.n}</td><td>${s.ja}</td><td>${s.pa}</td><td>${s.idx}</td></tr>`).join('')}</table>
-    <p class="small muted">Novidade: atende com índice ≥ 70 e nenhum artigo que já responde; parcial se houver 1 ou 2 que já respondem ou índice entre 40 e 69; não atende com 3 ou mais, ou índice abaixo de 40. Índice = 100 × (1 − (já respondem + ½ em parte) ÷ artigos lidos). Mede a sobreposição com os artigos mais próximos que as buscas encontraram; depende das consultas e da cobertura da base. ${A.saturou?'Saturação: nenhum artigo que já responde no último terço da lista.':''}</p></div>
+    <div style="margin:8px 0"><span class="kpi"><b>${A.novelty??'—'}</b><span class="small muted">índice de novidade (0–100)</span></span><span class="kpi"><b>${A.top.length}</b><span class="small muted">artigos lidos${A.foraN!=null?` (${A.onTopic} do tema, ${A.foraN} fora)`:''}</span></span><span class="kpi"><b>${A.corpusN}</b><span class="small muted">no corpus com resumo</span></span><span class="kpi"><b>${A.totals.reduce((s,x)=>s+(x.total||0),0)}</b><span class="small muted">resultados das buscas</span></span>${A.dur?`<span class="kpi"><b>${fmtDur(A.dur)}</b><span class="small muted">duração da análise</span></span>`:''}</div>
+    <table class="small" style="max-width:520px"><tr><th>Entre os mais próximos</th><th>Do tema</th><th>Fora do tema</th><th>Já respondem</th><th>Em parte</th><th>Índice</th></tr>${A.sat.map(s=>`<tr><td>${s.n}</td><td>${s.on??s.n}</td><td>${s.fora??'—'}</td><td>${s.ja}</td><td>${s.pa}</td><td>${s.idx??'—'}</td></tr>`).join('')}</table>
+    <p class="small muted">Novidade: atende com índice ≥ 70 e nenhum artigo que já responde; parcial se houver 1 ou 2 que já respondem ou índice entre 40 e 69; não atende com 3 ou mais, ou índice abaixo de 40. Índice = 100 × (1 − (já respondem + ½ em parte) ÷ artigos do tema lidos); os artigos fora do tema não entram na conta. Com menos de 10 artigos do tema (ou menos da metade dos lidos), a novidade fica sem dados. Mede a sobreposição com os artigos mais próximos que as buscas encontraram; depende das consultas e da cobertura da base. ${A.saturou?'Saturação: nenhum artigo que já responde no último terço da lista.':''}</p></div>
   <div class="card"><h2>Critérios</h2>${A.criteria.map(card).join('')}</div>
   ${A.summary.length?`<div class="card"><h2>O que a literatura diz</h2>${A.summary.map(f=>`<p class="small">${esc(f.texto)} <span class="muted">[${f.ids.map(id=>refLink(recById(p,id))).join('; ')}]</span></p>`).join('')}</div>`:''}
   <div class="card"><h2>Artigos lidos</h2><div class="tabs"><button class="${filt==='relevantes'?'on':''}" data-act="topF" data-f="relevantes">já respondem e em parte</button><button class="${filt==='todos'?'on':''}" data-act="topF" data-f="todos">todos (${A.top.length})</button></div>
-    ${list.map((t,i)=>{ const r=recById(p,t.id); if(!r) return ''; const c=r.cls?.[key+'|'+A.textHash]; return recLine(r, `<div class="small">${pill(t.classe)} <span class="muted">proximidade ${t.s}</span> ${c?.trecho?`<span class="quote">“${esc(c.trecho)}”</span>`:''}</div>`); }).join('')||'<p class="muted small">Nenhum artigo nesta categoria.</p>'}</div>`;
+    ${list.map((t,i)=>{ const r=recById(p,t.id); if(!r) return ''; const c=r.cls?.[A.ck||(key+'|'+A.textHash)]; return recLine(r, `<div class="small">${pill(t.classe)} <span class="muted">proximidade ${t.s}</span> ${c?.trecho?`<span class="quote">“${esc(c.trecho)}”</span>`:''}</div>`); }).join('')||'<p class="muted small">Nenhum artigo nesta categoria.</p>'}</div>`;
 }
 ACTIONS.topF = el => { S.topFilter=el.dataset.f; render(); };
 
@@ -1192,6 +1210,95 @@ const Sync = {
   async markDeleted(id){ const d=(await DB.get('kv','deleted'))||{}; d[id]=nowISO(); await DB.put('kv',d,'deleted'); this.schedule(); },
 };
 ACTIONS.syncNow = () => Sync.ok() ? Sync.sync() : (S.view='config', render(), toast('Configure o Gist primeiro.'));
+
+/* ---------- Exportar uma análise (TXT ou Word .docx) ---------- */
+const CLS_PT={ja_responde:'já responde', em_parte:'em parte', nao_responde:'não responde', fora_do_tema:'fora do tema'};
+const SRC_PT={texto:'texto do item', cadeia:'coerência com outro item', revista:'revista', lit:'literatura', literatura:'literatura'};
+function refFull(r){ if(!r) return ''; const au=(r.authors||'').split(';').map(s=>s.trim()).filter(Boolean); return `${au.length?au.slice(0,3).join('; ')+(au.length>3?' et al.':''):'s.a.'} (${r.year||'s.d.'}). ${r.title||''}.${r.venue?' '+r.venue+'.':''}${r.doi?' https://doi.org/'+r.doi:''}`; }
+function analysisModel(p, key, A){
+  const def=ITEMS[key], it=p.items[key], B=[]; const H=t=>B.push({h:t}), P=(t,b)=>B.push({p:t,b}), T=(rows)=>B.push({t:rows}), L=a=>B.push({l:a});
+  B.push({title:`Descartes — análise: ${def.name}`});
+  P(`Projeto: ${p.title}`); P(`Data: ${fmtDate(A.at)}${A.dur?` · duração: ${fmtDur(A.dur)}`:''} · modelo: ${A.model||S.config.ollamaModel} · artigos lidos: ${A.top.length} · Descartes v${VERSION}`);
+  if (key==='pergunta' && p.journal?.name) P(`Revista-alvo: ${p.journal.name}${p.journal.qualis?` (Qualis ${p.journal.qualis})`:''}`);
+  H(def.name); P(A.text);
+  if (A.warnings.length){ H('Avisos'); L(A.warnings); }
+  H('Consultas de busca (Semantic Scholar)'); T([['Consulta','Resultados'], ...A.queries.map(q=>[q, String(A.totals.find(x=>x.q===q)?.total??'—')])]);
+  if (it.concepts?.length){ H('Conceitos extraídos'); T([['Papel','Conceito','Termos'], ...it.concepts.map(b=>[PAPEL[b.papel]||b.papel, b.rotulo, b.terms.join(' | ')])]); }
+  H('Indicadores'); T([['Índice de novidade','Artigos lidos','Do tema','Fora do tema','No corpus com resumo','Resultados das buscas'],
+    [String(A.novelty??'—'), String(A.top.length), String(A.onTopic??'—'), String(A.foraN??'—'), String(A.corpusN), String(A.totals.reduce((s,x)=>s+(x.total||0),0))]]);
+  T([['Entre os mais próximos','Do tema','Fora do tema','Já respondem','Em parte','Índice'], ...A.sat.map(s=>[s.n,s.on??s.n,s.fora??'—',s.ja,s.pa,s.idx??'—'].map(String))]);
+  P('Índice = 100 × (1 − (já respondem + ½ em parte) ÷ artigos do tema lidos). Mede a sobreposição com os artigos mais próximos que as buscas encontraram; depende das consultas e da cobertura da base.');
+  H('Critérios'); T([['Critério','Status','Fonte'], ...A.criteria.map(c=>[c.t, STATUS[c.status]?.[1]||c.status, SRC_PT[c.src]||c.src])]);
+  for (const c of A.criteria){
+    P(`${c.t} — ${STATUS[c.status]?.[1]||c.status}${c.id==='novidade'&&A.novelty!=null?` (índice ${A.novelty})`:''}`, true);
+    if (c.justificativa) P(c.justificativa); if (c.sugestao) P('Onde melhorar: '+c.sugestao);
+    if (c.trecho) P(`Trecho do item: “${c.trecho}”${c.trechoOK?'':' (não encontrado no item)'}`);
+    const refs=(c.ids||[]).map(id=>refFull(recById(p,id))).filter(Boolean); if (refs.length){ P('Evidência:'); L(refs); }
+    if (c.venueRefs?.length){ P(`Artigos da revista com termos próximos (${c.venueN}):`); L(c.venueRefs.map(r=>`${r.title} (${r.year||'s.d.'})${r.doi?' https://doi.org/'+r.doi:''}`)); }
+  }
+  if (A.summary.length){ H('O que a literatura diz'); for (const f of A.summary) P(`${f.texto} [${f.ids.map(id=>refPlain(recById(p,id))).join('; ')}]`); }
+  const ck=A.ck||(key+'|'+A.textHash);
+  H('Artigos lidos (do mais ao menos próximo)');
+  T([['#','Classe','Proximidade','Referência','Trecho do resumo'], ...A.top.map((t,i)=>{ const r=recById(p,t.id); const c=r?.cls?.[ck]; return [String(i+1), CLS_PT[t.classe]||t.classe, String(t.s), refFull(r), c?.trecho||'']; })]);
+  const rel=A.top.filter(t=>t.classe==='ja_responde'||t.classe==='em_parte');
+  if (rel.length){ H('Referências que já respondem ou respondem em parte'); L(rel.map(t=>refFull(recById(p,t.id)))); }
+  return B;
+}
+function modelToTxt(B){
+  const out=[];
+  for (const b of B){
+    if (b.title) out.push(b.title.toUpperCase(), '='.repeat(Math.min(80,b.title.length)), '');
+    else if (b.h) out.push('', b.h.toUpperCase(), '-'.repeat(Math.min(80,b.h.length)));
+    else if (b.p!=null) out.push(b.b?'\n'+b.p:b.p);
+    else if (b.l) out.push(...b.l.map(x=>'  - '+x));
+    else if (b.t){ const [hd,...rows]=b.t; for (const r of rows) out.push('  '+r.map((v,i)=>`${hd[i]}: ${v}`).join(' | ')); }
+  }
+  return out.join('\n').replace(/\n{3,}/g,'\n\n')+'\n';
+}
+/* .docx mínimo: ZIP sem compressão com [Content_Types].xml, _rels/.rels e word/document.xml */
+const xmlEsc = s => String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'');
+function docxXml(B){
+  const run=(t,{b=false,sz=22}={})=>`<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>${b?'<w:b/>':''}<w:sz w:val="${sz}"/></w:rPr><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r>`;
+  const para=(t,o={},sp=120)=>`<w:p><w:pPr><w:spacing w:after="${sp}"/></w:pPr>${run(t,o)}</w:p>`;
+  const body=B.map(b=>{
+    if (b.title) return para(b.title,{b:true,sz:32},240);
+    if (b.h) return `<w:p><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/></w:pPr>${run(b.h,{b:true,sz:26})}</w:p>`;
+    if (b.p!=null) return para(b.p,{b:!!b.b});
+    if (b.l) return b.l.map(x=>`<w:p><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="220"/></w:pPr>${run('• '+x,{sz:20})}</w:p>`).join('');
+    if (b.t){ const bd='<w:top w:val="single" w:sz="4" w:color="999999"/><w:left w:val="single" w:sz="4" w:color="999999"/><w:bottom w:val="single" w:sz="4" w:color="999999"/><w:right w:val="single" w:sz="4" w:color="999999"/><w:insideH w:val="single" w:sz="4" w:color="999999"/><w:insideV w:val="single" w:sz="4" w:color="999999"/>';
+      return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>${bd}</w:tblBorders><w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr>`+
+        b.t.map((r,i)=>`<w:tr>${i===0?'<w:trPr><w:tblHeader/></w:trPr>':''}${r.map(c=>`<w:tc><w:tcPr>${i===0?'<w:shd w:val="clear" w:color="auto" w:fill="E8EEF4"/>':''}</w:tcPr><w:p><w:pPr><w:spacing w:after="0"/></w:pPr>${run(c,{b:i===0,sz:18})}</w:p></w:tc>`).join('')}</w:tr>`).join('')+`</w:tbl><w:p/>`; }
+    return '';
+  }).join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+}
+const CRC_T=(()=>{ const t=new Uint32Array(256); for (let n=0;n<256;n++){ let c=n; for (let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
+const crc32=u=>{ let c=0xFFFFFFFF; for (const b of u) c=CRC_T[(c^b)&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; };
+function zipStore(files){   // files: [[nome, texto]]
+  const enc=new TextEncoder(), parts=[], cen=[]; let off=0;
+  const u16=v=>[v&255,(v>>>8)&255], u32=v=>[v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255];
+  for (const [name,text] of files){
+    const nb=enc.encode(name), db=enc.encode(text), crc=crc32(db);
+    const head=[...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(crc),...u32(db.length),...u32(db.length),...u16(nb.length),...u16(0)];
+    parts.push(new Uint8Array([0x50,0x4b,3,4,...head]), nb, db);
+    cen.push(new Uint8Array([0x50,0x4b,1,2,...u16(20),...head,...u16(0),...u16(0),...u16(0),...u32(0),...u32(off)]), nb);
+    off+=30+nb.length+db.length;
+  }
+  const cs=cen.reduce((s,x)=>s+x.length,0);
+  return new Blob([...parts,...cen,new Uint8Array([0x50,0x4b,5,6,...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(cs),...u32(off),...u16(0)])],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+}
+function docxBlob(B){
+  return zipStore([
+    ['[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+    ['_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+    ['word/document.xml', docxXml(B)]]);
+}
+ACTIONS.exportA = el => {
+  const p=cur(), key=el.dataset.k, A=p.items[key].analyses.find(a=>a.id===el.dataset.a); if (!A) return;
+  const B=analysisModel(p, key, A), base=`descartes_${key}_${normTxt(p.title).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)}_${A.at.slice(0,10)}`;
+  if (el.dataset.f==='txt') download(base+'.txt', modelToTxt(B), 'text/plain;charset=utf-8');
+  else { const a=document.createElement('a'); a.href=URL.createObjectURL(docxBlob(B)); a.download=base+'.docx'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+};
 boot();
 </script>
 </body>
