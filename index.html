@@ -89,7 +89,7 @@ details summary{cursor:pointer}
   <select id="projSel" style="width:auto;max-width:240px"></select>
   <nav id="nav"></nav>
   <span class="grow"></span>
-  <span id="llmStatus" class="pill">IA: verificando…</span>
+  <span id="llmStatus" class="pill" data-act="recheckLLM" style="cursor:pointer" title="Clique para verificar de novo">IA: verificando…</span>
   <span id="syncStatus" class="pill">local</span>
 </header>
 <main id="app"></main>
@@ -99,7 +99,7 @@ details summary{cursor:pointer}
 /* ---- core.js ---- */
 'use strict';
 /* ================= Descartes v0.2 — núcleo ================= */
-const VERSION = '0.2.4';
+const VERSION = '0.2.5';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = (p='id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -219,7 +219,8 @@ async function boot(){
   S.currentId = (await DB.get('kv','currentId')) || S.projects[0]?.id || null;
   if (!S.projects.find(p=>p.id===S.currentId)) S.currentId = S.projects[0]?.id || null;
   render();
-  LLM.checkStatus();
+  LLM.checkStatus().then(()=>render());
+  setInterval(()=>{ if (!LLM.online) LLM.checkStatus().then(ok=>{ if (ok) render(); }); }, 20000);   // liga sozinho quando o Ollama subir
   Sync.init();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
@@ -1003,7 +1004,7 @@ function journalPicker(p){
 }
 ACTIONS.setJournal = () => { const p=cur(); const v=$('#jrnl').value.trim(); if(!v){ p.journal=null; touch(p); return render(); }
   const c=S.catalog.find(x=>normTxt(x.nome)===normTxt(v)); p.journal = c ? {name:c.nome, issn:c.issn, pagina:c.pagina, normas:c.normas, escopo:c.escopo, qualis:c.qualis} : {name:v, fora:true};
-  if (!c) toast(S.catalog.length?'Essa revista não está no catálogo do LabResearch. Confira o nome completo (ex.: Remote Sensing of Environment): o alinhamento busca artigos pelo nome exato da revista.':'Sem catálogo: use o nome completo e exato da revista.', 8000);
+  if (!c) toast('Essa revista não está no catálogo do LabResearch (periódicos Springer e os que você cadastrou no LabResearch). Pode usar assim mesmo: o alinhamento busca os artigos da revista pelo nome exato no Semantic Scholar, então escreva o nome completo e oficial.', 9000);
   touch(p); render(); };
 
 function renderItem(p, key){
@@ -1105,6 +1106,7 @@ function renderConfig(){
   <div class="card"><h2>Backup</h2><div class="row"><button class="b sec" data-act="exportBackup">Exportar backup (JSON)</button><input type="file" id="bkFile" accept=".json"><button class="b sec" data-act="importBackup">Importar backup</button></div>
     ${cur()?`<div class="row" style="margin-top:10px"><button class="b danger" data-act="deleteProject">Excluir projeto atual</button></div>`:''}<p class="small muted">Descartes v${VERSION}</p></div>`;
 }
+ACTIONS.recheckLLM = async () => { const ok=await LLM.checkStatus(); render(); if (!ok) toast('O Descartes não alcança o Ollama em '+S.config.ollamaBase+'. No PC, abra o terminal do WSL (o Ollama só sobe com o WSL ligado) e confira: curl http://localhost:11434', 9000); };
 ACTIONS.testLLM = async () => { const ok=await LLM.checkStatus(); if(!ok) return toast('Sem IA: verifique o Ollama e o OLLAMA_ORIGINS.', 7000);
   try{ const out=await LLM.chat({system:'Responda em JSON.', user:'Responda {"ok": true}', schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok']}}); toast(out.ok?'Conexão OK.':'Resposta inesperada.'); }catch(e){ toast(e.message, 7000); } };
 
@@ -1142,14 +1144,25 @@ function findJournals(obj, out=[], depth=0){
   if (typeof obj==='object') for (const v of Object.values(obj)) findJournals(v, out, depth+1);
   return out;
 }
-async function setCatalog(list){ const m=new Map(); for (const j of list) if (j.nome && !m.has(normTxt(j.nome))) m.set(normTxt(j.nome), j); if (!m.size) return false;
+async function setCatalog(list){ const m=new Map(); for (const j of list){ if (!j.nome) continue; const k=normTxt(j.nome), o=m.get(k); if (!o) m.set(k, {...j}); else for (const f of ['issn','pagina','normas','escopo','qualis']) if (!o[f] && j[f]) o[f]=j[f]; } if (!m.size) return false;
   S.catalog=[...m.values()].sort((a,b)=>a.nome.localeCompare(b.nome)); await DB.put('kv', S.catalog, 'catalog'); return true; }
+/* Catálogo do LabResearch: os periódicos que você cadastrou (Gist) + o catálogo Springer embutido na página do LabResearch (mesmo domínio) */
+async function labCatalog(g){
+  const out=[]; const fc=async n=>{ try{ return JSON.parse(await Sync.fileContent(g?.files?.[n])||'null'); }catch(e){ return null; } };
+  const qm=(g && await fc('labresearch_qualis.json'))||{};
+  for (const p of (g && await fc('labresearch_periodicos.json'))||[]) if (p?.nome) out.push({nome:p.nome, issn:p.issn||'', pagina:p.url||'', normas:'', escopo:'', qualis:p.qualis||qm[p.issn]||''});
+  try{ const r=await fetch(location.origin+'/manuscritos/index.html',{cache:'no-cache'}); if (r.ok){ const h=await r.text();
+    const m=h.match(/const CATALOGO=(\[[\s\S]*?\]);\s*\n/), im=h.match(/const CAT_IMP=(\[[^\n]*?\]);/);
+    if (m){ const imp=im?JSON.parse(im[1]):[]; for (const c of JSON.parse(m[1])){ const b='https://link.springer.com/journal/'+c[0], nature=imp[c[3]]==='Springer Nature';
+      out.push({nome:c[1], issn:c[2], pagina:'https://springer.com/'+c[0], normas:nature?'':b+'/submission-guidelines', escopo:nature?'':b+'/aims-and-scope', qualis:qm[c[2]]||''}); } } } }catch(e){}
+  return out;
+}
 /* ---------- Sincronização pelo Gist ---------- */
 const Sync = {
   status:'local', timer:null, running:false,
   ok(){ return !!(S.config.gistId && S.config.githubToken); },
   setStatus(s){ this.status=s; const el=$('#syncStatus'); if(el){ el.textContent=s; el.dataset.act='syncNow'; el.style.cursor='pointer'; } },
-  init(){ if (this.ok()) this.sync(); else this.setStatus('local'); },
+  init(){ if (this.ok()) this.sync(); else { this.setStatus('local'); if (!S.catalog.length) labCatalog(null).then(l=>setCatalog(l)).then(ok=>ok&&render()); } },
   async gh(method, body){ const r=await fetch(`https://api.github.com/gists/${S.config.gistId.trim()}`,{method, headers:{Authorization:'Bearer '+S.config.githubToken.trim(), Accept:'application/vnd.github+json', ...(body?{'Content-Type':'application/json'}:{})}, body:body?JSON.stringify(body):undefined});
     if (!r.ok) throw new Error(({401:'token inválido, expirado ou revogado (HTTP 401). Gere um token clássico com escopo gist e cole de novo',403:'o token não tem permissão para Gists ou o limite de uso foi atingido (HTTP 403)',404:'Gist não encontrado (HTTP 404). Confira o ID: use o mesmo do LabResearch'})[r.status]||('GitHub HTTP '+r.status)); return r.json(); },
   async fileContent(f){ if (!f) return null; if (f.truncated){ const r=await fetch(f.raw_url); return r.ok? r.text() : null; } return f.content; },
@@ -1166,6 +1179,7 @@ const Sync = {
       for (const p of S.projects) await DB.put('projects',p); await DB.put('kv',S.programs,'programs'); await DB.put('kv',deleted,'deleted');
       // catálogo: arquivos do LabResearch no mesmo Gist
       const js=[]; for (const [name,f] of Object.entries(g.files||{})){ if (name==='descartes.json' || !/\.json$/i.test(name)) continue; try{ findJournals(JSON.parse(await this.fileContent(f)), js); }catch(e){} }
+      js.push(...await labCatalog(g));
       if (!js.length && !mine) throw new Error('este Gist não é o do LabResearch (não tem o catálogo de revistas nem dados do Descartes). Confira o ID; nada foi gravado nele');
       if (js.length) await setCatalog(js);
       await this.gh('PATCH', {files:{'descartes.json':{content:JSON.stringify({app:'descartes', version:VERSION, at:nowISO(), projects:S.projects, programs:S.programs, deleted})}}});
